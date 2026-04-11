@@ -15,11 +15,3 @@ Before inviting the bot, you must enable two **Privileged Gateway Intents** in t
 
 1. **Server Members Intent**: Needed so the bot can auto-enroll your friends when you setup the channel.
 2. **Message Content Intent**: Needed so the bot can read your code blocks and award points.
-
-## Running Locally
-
-1. Install Rust via `rustup` if you haven't already:
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
