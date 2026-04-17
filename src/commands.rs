@@ -1,7 +1,7 @@
 use crate::models::{Context, Error};
 use poise::ChoiceParameter;
 use poise::serenity_prelude as serenity;
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 
 #[poise::command(slash_command)]
 pub async fn scores(ctx: Context<'_>) -> Result<(), Error> {
@@ -77,7 +77,8 @@ pub async fn random(
         .collect();
 
     let question = {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
+
         filtered.choose(&mut rng).map(|&q| q.clone())
     };
 
