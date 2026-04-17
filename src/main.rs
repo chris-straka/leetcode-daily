@@ -20,6 +20,8 @@ async fn main() {
                 commands::random(),
                 commands::channel(),
                 commands::poll(),
+                commands::contest_setup(),
+                commands::ratings(),
             ],
             event_handler: |ctx, event, framework, data| {
                 Box::pin(events::event_handler(ctx, event, framework, data))
@@ -38,11 +40,20 @@ async fn main() {
                     )),
                 };
 
-                let task_data = Arc::new(data.clone());
-                let task_ctx = Arc::new(ctx.clone());
+                // Spawn Daily Task
+                let task_data_1 = Arc::new(data.clone());
+                let task_ctx_1 = Arc::new(ctx.clone());
                 tokio::spawn(async move {
-                    tasks::schedule_daily_question(task_ctx, task_data).await;
+                    tasks::schedule_daily_question(task_ctx_1, task_data_1).await;
                 });
+
+                // Spawn Contest Task
+                let task_data_2 = Arc::new(data.clone());
+                let task_ctx_2 = Arc::new(ctx.clone());
+                tokio::spawn(async move {
+                    tasks::schedule_contests(task_ctx_2, task_data_2).await;
+                });
+
                 Ok(data)
             })
         })
@@ -52,6 +63,7 @@ async fn main() {
         | serenity::GatewayIntents::GUILD_MESSAGES
         | serenity::GatewayIntents::MESSAGE_CONTENT
         | serenity::GatewayIntents::GUILD_MEMBERS;
+
     serenity::ClientBuilder::new(token, intents)
         .framework(framework)
         .await
