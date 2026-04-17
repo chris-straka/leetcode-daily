@@ -1,0 +1,7 @@
+{
+  "recommendations": [
+    "humao.rest-client",
+    "rust-lang.rust-analyzer",
+    "ziglang.vscode-zig"
+  ]
+}
