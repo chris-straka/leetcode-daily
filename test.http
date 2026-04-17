@@ -1,0 +1,7 @@
+POST https://leetcode.com/graphql
+Content-Type: application/json
+
+{
+    "query": "query contestV2UpcomingContests { contestV2UpcomingContests { title startTime titleSlug } }",
+    "variables": {}
+}

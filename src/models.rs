@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Default, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct GuildData {
     pub users: HashMap<serenity::UserId, Status>,
     pub channel_id: Option<serenity::ChannelId>,
@@ -12,17 +13,22 @@ pub struct GuildData {
     pub poll_id: Option<serenity::MessageId>,
     pub active_weekly: bool,
     pub active_daily: bool,
+    // --- NEW STATE FIELDS ---
+    pub last_daily_date: Option<String>, 
+    pub alerted_contests: Vec<String>,   
 }
 
 #[derive(Default, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct Status {
-    pub leetcode_username: Option<String>, 
+    pub leetcode_username: Option<String>,
     pub voted_for: Option<serenity::UserId>,
     pub submitted: Option<String>,
     pub weekly_submissions: usize,
     pub monthly_record: u32,
     pub days_missed: u32,
     pub score: usize,
+    pub contest_rating: f64,
 }
 
 #[derive(Clone)]

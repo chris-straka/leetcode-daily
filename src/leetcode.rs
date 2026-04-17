@@ -44,10 +44,15 @@ pub async fn fetch_daily_question() -> Result<DailyChallenge, reqwest::Error> {
     let query = r#"query { activeDailyCodingChallengeQuestion { link question { acRate difficulty questionFrontendId isPaidOnly title } } }"#;
     let res: DailyResponse = Client::new()
         .post(format!("{URL}/graphql"))
-        .json(&GqlQuery { query: query.into(), variables: json!({}) })
-        .send().await?
-        .json().await?;
-    
+        .json(&GqlQuery {
+            query: query.into(),
+            variables: json!({}),
+        })
+        .send()
+        .await?
+        .json()
+        .await?;
+
     Ok(res.data.active_daily_coding_challenge_question)
 }
 
@@ -56,9 +61,14 @@ pub async fn fetch_all_questions() -> Result<Vec<Question>, String> {
     let query = r#"query { questionList(limit: 5000) { data { acRate difficulty questionFrontendId isPaidOnly title } } }"#;
     let res = Client::new()
         .post(format!("{URL}/graphql"))
-        .json(&GqlQuery { query: query.into(), variables: json!({}) })
-        .send().await.map_err(|e| e.to_string())?;
-    
+        .json(&GqlQuery {
+            query: query.into(),
+            variables: json!({}),
+        })
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
     let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
     serde_json::from_value(json["data"]["questionList"]["data"].clone()).map_err(|e| e.to_string())
 }
@@ -76,7 +86,11 @@ pub fn create_embed(question: &Question, link: &str) -> serenity::CreateEmbed {
         .url(format!("{}{}", URL, link))
         .color(color)
         .field("Difficulty", &question.difficulty, true)
-        .field("Acceptance Rate", format!("{:.2}%", question.ac_rate.unwrap_or_default()), true)
+        .field(
+            "Acceptance Rate",
+            format!("{:.2}%", question.ac_rate.unwrap_or_default()),
+            true,
+        )
 }
 
 #[derive(Deserialize, Debug)]
@@ -97,20 +111,62 @@ struct SubmissionsData {
     recent_ac_submission_list: Vec<Submission>,
 }
 
-// Fetches the last 15 accepted submissions for a user
-pub async fn fetch_recent_ac_submissions(username: &str) -> Result<Vec<Submission>, reqwest::Error> {
-    let query = r#"query recentAcSubmissions($username: String!, $limit: Int!) { 
-        recentAcSubmissionList(username: $username, limit: $limit) { titleSlug timestamp } 
-    }"#;
-    
+pub async fn fetch_recent_ac_submissions(
+    username: &str,
+) -> Result<Vec<Submission>, reqwest::Error> {
+    let query = r#"query recentAcSubmissions($username: String!, $limit: Int!) { recentAcSubmissionList(username: $username, limit: $limit) { titleSlug timestamp } }"#;
     let res: SubmissionsResponse = Client::new()
         .post(format!("{}/graphql", URL))
-        .json(&GqlQuery { 
-            query: query.into(), 
-            variables: json!({ "username": username, "limit": 15 }) 
+        .json(&GqlQuery {
+            query: query.into(),
+            variables: json!({ "username": username, "limit": 30 }),
         })
-        .send().await?
-        .json().await?;
-    
+        .send()
+        .await?
+        .json()
+        .await?;
     Ok(res.data.recent_ac_submission_list)
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Contest {
+    pub title: String,
+    pub start_time: i64,
+}
+
+pub async fn fetch_upcoming_contests() -> Result<Vec<Contest>, reqwest::Error> {
+    let query = r#"query { topTwoContests { title startTime } }"#;
+    let res: serde_json::Value = Client::new()
+        .post(format!("{URL}/graphql"))
+        .json(&GqlQuery {
+            query: query.into(),
+            variables: json!({}),
+        })
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    let contests =
+        serde_json::from_value(res["data"]["topTwoContests"].clone()).unwrap_or_default();
+    Ok(contests)
+}
+
+pub async fn fetch_user_rating(username: &str) -> Result<f64, reqwest::Error> {
+    let query = r#"query userContestRankingInfo($username: String!) { userContestRanking(username: $username) { rating } }"#;
+    let res: serde_json::Value = Client::new()
+        .post(format!("{URL}/graphql"))
+        .json(&GqlQuery {
+            query: query.into(),
+            variables: json!({ "username": username }),
+        })
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    Ok(res["data"]["userContestRanking"]["rating"]
+        .as_f64()
+        .unwrap_or(0.0))
 }
