@@ -1,25 +1,30 @@
 # [LeetCode Daily Bot](https://github.com/chris-straka/leetcode-daily)
 
 A Discord bot to keep you and your friends motivated doing LeetCode!
-Entirely rewritten using `poise` for modern native slash commands.
 
-## Features
+## 🚀 How to Play
 
-- Daily Question fetching with leaderboard tracking.
-- Native Discord slash commands (`/scores`, `/poll`, `/channel`, `/random` with dropdown menus).
-- Points rewarded automatically when sharing code blocks natively via regex processing.
+1. **Register:** Run `/register <your_leetcode_username>`.
+2. **Solve:** Every day, the bot posts a challenge in a new thread.
+3. **Submit:** Solve it on LeetCode.com, then paste your code in the Discord thread inside a code block (```).
+4. **Earn:** The bot verifies your solve via the LeetCode API and awards points. Solve it early for a bonus!
 
-## Discord Portal Setup
+## 🛠 Commands
 
-Before inviting the bot, you must enable two **Privileged Gateway Intents** in the Discord Developer Portal under your application's "Bot" tab:
+- `/daily`: Get the link to today's daily challenge.
+- `/contests`: See when the next Weekly and Bi-Weekly contests start.
+- `/scores`: View the server leaderboard.
+- `/ratings`: View the server LeetCode contest rating leaderboard.
+- `/register`: Link your LeetCode account.
+- `/random`: Get a random question.
 
-1. **Server Members Intent**: Needed so the bot can auto-enroll your friends when you setup the channel.
-2. **Message Content Intent**: Needed so the bot can read your code blocks and award points.
+## ⚙️ Discord Portal Setup
 
-# [Bot install link](https://discord.com/oauth2/authorize?client_id=1492343278060835001)
+1. Enable **Server Members Intent** and **Message Content Intent** in the Discord Developer Portal under your application's "Bot" tab.
+2. Invite the bot using the link below.
+3. Run `/channel #your-channel` to start the Daily Question cycle.
+4. Run `/contest_setup #your-channel` to start Contest Alerts.
 
-Idk how the permissions work exactly? 😵‍💫
-I'm assuming they're saved in our server settings 😵‍💫
+[**Bot Install Link**](https://discord.com/oauth2/authorize?client_id=1492343278060835001&permissions=2252246490639424&integration_type=0&scope=bot+applications.commands)
 
-
-https://discord.com/developers/applications/1492343278060835001/information
+[**Bot Developer Page**](https://discord.com/developers/applications/1492343278060835001/information)

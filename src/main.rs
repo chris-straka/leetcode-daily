@@ -10,6 +10,8 @@ use std::sync::Arc;
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
+    tracing_subscriber::fmt::init();
+
     let token = std::env::var("DISCORD_TOKEN").expect("Missing DISCORD_TOKEN");
 
     let framework = poise::Framework::builder()
@@ -22,9 +24,19 @@ async fn main() {
                 commands::poll(),
                 commands::contest_setup(),
                 commands::ratings(),
+                commands::daily(),
+                commands::contests(),
             ],
             event_handler: |ctx, event, framework, data| {
                 Box::pin(events::event_handler(ctx, event, framework, data))
+            },
+            on_error: |error| {
+                Box::pin(async move {
+                    tracing::error!("Poise error: {:?}", error);
+                    if let poise::FrameworkError::Command { error, ctx, .. } = error {
+                        let _ = ctx.say(format!("❌ Error: {}", error)).await;
+                    }
+                })
             },
             ..Default::default()
         })
@@ -40,18 +52,16 @@ async fn main() {
                     )),
                 };
 
-                // Spawn Daily Task
-                let task_data_1 = Arc::new(data.clone());
-                let task_ctx_1 = Arc::new(ctx.clone());
+                let t1_data = Arc::new(data.clone());
+                let t1_ctx = Arc::new(ctx.clone());
                 tokio::spawn(async move {
-                    tasks::schedule_daily_question(task_ctx_1, task_data_1).await;
+                    tasks::schedule_daily_question(t1_ctx, t1_data).await;
                 });
 
-                // Spawn Contest Task
-                let task_data_2 = Arc::new(data.clone());
-                let task_ctx_2 = Arc::new(ctx.clone());
+                let t2_data = Arc::new(data.clone());
+                let t2_ctx = Arc::new(ctx.clone());
                 tokio::spawn(async move {
-                    tasks::schedule_contests(task_ctx_2, task_data_2).await;
+                    tasks::schedule_contests(t2_ctx, t2_data).await;
                 });
 
                 Ok(data)

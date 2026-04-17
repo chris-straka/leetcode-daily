@@ -19,7 +19,7 @@ pub struct Question {
     pub difficulty: String,
     #[serde(rename = "questionFrontendId")]
     pub id: String,
-    pub is_paid_only: bool,
+    // pub is_paid_only: bool,
     pub title: String,
 }
 

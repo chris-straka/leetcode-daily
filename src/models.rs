@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Default, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct GuildData {
     pub users: HashMap<serenity::UserId, Status>,
@@ -13,12 +13,11 @@ pub struct GuildData {
     pub poll_id: Option<serenity::MessageId>,
     pub active_weekly: bool,
     pub active_daily: bool,
-    // --- NEW STATE FIELDS ---
     pub last_daily_date: Option<String>, 
     pub alerted_contests: Vec<String>,   
 }
 
-#[derive(Default, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct Status {
     pub leetcode_username: Option<String>,
@@ -31,7 +30,7 @@ pub struct Status {
     pub contest_rating: f64,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Data {
     pub db: Arc<tokio::sync::RwLock<HashMap<serenity::GuildId, GuildData>>>,
 }
@@ -39,7 +38,11 @@ pub struct Data {
 impl Data {
     pub async fn save(&self) {
         let db = self.db.read().await;
-        if let Ok(json) = serde_json::to_string_pretty(&*db) {
+        self.save_from_lock(&db).await;
+    }
+
+    pub async fn save_from_lock(&self, db: &HashMap<serenity::GuildId, GuildData>) {
+        if let Ok(json) = serde_json::to_string_pretty(db) {
             let _ = tokio::fs::write("database.json", json).await;
         }
     }

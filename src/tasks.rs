@@ -5,151 +5,93 @@ use std::sync::Arc;
 
 pub async fn schedule_daily_question(ctx: Arc<serenity::Context>, data: Arc<Data>) {
     loop {
-        // Sleep for 60 seconds, then check if we need to do anything
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-
-        let today_str = Utc::now().format("%Y-%m-%d").to_string();
-        let mut targets = Vec::new();
-
-        {
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        
+        let targets = {
             let db = data.db.read().await;
-            for (guild_id, guild_data) in db.iter() {
-                if guild_data.active_daily && guild_data.channel_id.is_some() {
-                    // Check our new state field
-                    if guild_data.last_daily_date.as_ref() != Some(&today_str) {
-                        targets.push((*guild_id, guild_data.channel_id.unwrap()));
-                    }
-                }
-            }
-        }
-
-        if targets.is_empty() {
-            continue; // Nothing to do, go back to sleep
-        }
-
-        let challenge = match crate::leetcode::fetch_daily_question().await {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("LeetCode API error: {e}");
-                continue;
-            }
+            db.iter()
+                .filter(|(_, g)| g.active_daily && g.channel_id.is_some() && g.last_daily_date.as_ref() != Some(&today))
+                .map(|(id, g)| (*id, g.channel_id.unwrap())).collect::<Vec<_>>()
         };
+
+        if targets.is_empty() { continue; }
+        let Ok(challenge) = crate::leetcode::fetch_daily_question().await else { continue; };
 
         for (guild_id, channel_id) in targets {
             let embed = crate::leetcode::create_embed(&challenge.question, &challenge.link);
+            if let Ok(msg) = channel_id.send_message(&ctx, serenity::CreateMessage::new().content("Daily Question out!").embed(embed)).await {
+                let tid = channel_id.create_thread_from_message(&ctx, msg.id, serenity::CreateThread::new(Utc::now().format("%d/%m/%Y").to_string())).await.map(|t| t.id).ok();
+                if let Some(t) = tid { let _ = t.say(&ctx, "Paste solution in a code block to earn points!").await; }
 
-            if let Ok(msg) = channel_id
-                .send_message(
-                    &ctx,
-                    serenity::CreateMessage::new()
-                        .content("Daily Question out!")
-                        .embed(embed),
-                )
-                .await
-            {
-                let thread_name = Utc::now().format("%d/%m/%Y").to_string();
-                let thread_id = channel_id
-                    .create_thread_from_message(
-                        &ctx,
-                        msg.id,
-                        serenity::CreateThread::new(thread_name)
-                            .kind(serenity::ChannelType::PublicThread),
-                    )
-                    .await
-                    .map(|t| t.id)
-                    .ok();
-
-                if let Some(tid) = thread_id {
-                    let _ = tid
-                        .say(
-                            &ctx,
-                            "Paste your solution in a code block here to earn points!",
-                        )
-                        .await;
-                }
-
-                // Update the state so we don't post again today
                 let mut db = data.db.write().await;
-                if let Some(guild_data) = db.get_mut(&guild_id) {
-                    guild_data.thread_id = thread_id;
-                    guild_data.last_daily_date = Some(today_str.clone());
-
-                    for user in guild_data.users.values_mut() {
-                        if user.submitted.is_none() {
-                            user.days_missed += 1;
-                            user.score = user.score.saturating_sub(1);
-                        }
-                        user.submitted = None;
-                        user.voted_for = None;
-                    }
+                if let Some(g) = db.get_mut(&guild_id) {
+                    g.thread_id = tid;
+                    g.last_daily_date = Some(today.clone());
+                    for u in g.users.values_mut() { if u.submitted.is_none() { u.score = u.score.saturating_sub(1); } u.submitted = None; }
                 }
+                data.save_from_lock(&db).await;
             }
         }
-        data.save().await;
     }
 }
 
 pub async fn schedule_contests(ctx: Arc<serenity::Context>, data: Arc<Data>) {
     loop {
-        // Poll every 5 minutes for contests
         tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-
-        let Ok(contests) = crate::leetcode::fetch_upcoming_contests().await else {
-            continue;
-        };
-
+        let Ok(contests) = crate::leetcode::fetch_upcoming_contests().await else { continue; };
         let now = Utc::now().timestamp();
-        let mut needs_save = false;
 
         for contest in contests {
-            let starts_in = contest.start_time - now;
+            let diff = contest.start_time - now;
+            
+            // Tiered alerts (fires once per poll cycle)
+            let is_24h = diff > 86100 && diff <= 86400;
+            let is_1h = diff > 3300 && diff <= 3600;
+            let is_15m = diff > 600 && diff <= 900;
+            let is_start = diff <= 0 && diff > -300; // Only alert for 5 mins after start
 
-            // Check if within 15 minutes
-            let is_15m_warning = starts_in > 0 && starts_in <= 900;
-            // Check if currently active (within 2 hours of start)
-            let is_start_warning = starts_in <= 0 && starts_in > -7200;
+            let guilds = {
+                let db = data.db.read().await;
+                db.iter().filter(|(_, g)| g.active_weekly && g.weekly_id.is_some())
+                    .map(|(id, g)| (*id, g.weekly_id.unwrap(), g.alerted_contests.clone())).collect::<Vec<_>>()
+            };
 
-            let key_15m = format!("{}-15m", contest.title);
-            let key_start = format!("{}-start", contest.title);
+            for (gid, cid, alerted) in guilds {
+                let (k24, k1, k15, ks) = (
+                    format!("{}-24h", contest.title), 
+                    format!("{}-1h", contest.title), 
+                    format!("{}-15m", contest.title), 
+                    format!("{}-start", contest.title)
+                );
+                
+                let mut key = None;
+                let mut content = None;
 
-            let guilds = { data.db.read().await.clone() };
-
-            for (guild_id, guild_data) in guilds {
-                if !guild_data.active_weekly || guild_data.weekly_id.is_none() {
-                    continue;
+                if is_24h && !alerted.contains(&k24) {
+                    content = Some(format!("📅 **Contest Tomorrow**: {} starts in 24 hours! Get some sleep.", contest.title));
+                    key = Some(k24);
+                } else if is_1h && !alerted.contains(&k1) {
+                    content = Some(format!("⏰ **1 Hour Warning**: {} is starting soon!", contest.title));
+                    key = Some(k1);
+                } else if is_15m && !alerted.contains(&k15) {
+                    content = Some(format!("🚨 **15 Minutes**: {} is about to begin. Join the lobby!", contest.title));
+                    key = Some(k15);
+                } else if is_start && !alerted.contains(&ks) {
+                    content = Some(format!("🚀 **Started**: {} is live! Good luck everyone!", contest.title));
+                    key = Some(ks);
                 }
 
-                let channel_id = guild_data.weekly_id.unwrap();
-                let mut db = data.db.write().await;
-                let g_data = db.get_mut(&guild_id).unwrap();
-
-                if is_15m_warning && !g_data.alerted_contests.contains(&key_15m) {
-                    let msg = format!(
-                        "🚨 **15 MINUTE WARNING** 🚨\n**{}** is starting soon! Get ready on LeetCode.",
-                        contest.title
-                    );
-                    let _ = channel_id.say(&ctx, msg).await;
-                    g_data.alerted_contests.push(key_15m.clone());
-                    needs_save = true;
-                }
-
-                if is_start_warning && !g_data.alerted_contests.contains(&key_start) {
-                    let msg = format!("🚀 **{} HAS STARTED!** Good luck!", contest.title);
-                    let _ = channel_id.say(&ctx, msg).await;
-                    g_data.alerted_contests.push(key_start.clone());
-                    needs_save = true;
-                }
-
-                // Prevent the tracking array from growing infinitely
-                if g_data.alerted_contests.len() > 20 {
-                    let len = g_data.alerted_contests.len();
-                    g_data.alerted_contests.drain(0..(len - 20));
+                if let (Some(msg), Some(k)) = (content, key) {
+                    let _ = cid.say(&ctx, msg).await;
+                    let mut db = data.db.write().await;
+                    if let Some(g) = db.get_mut(&gid) { 
+                        g.alerted_contests.push(k); 
+                        if g.alerted_contests.len() > 30 { g.alerted_contests.remove(0); }
+                    }
+                    data.save_from_lock(&db).await;
                 }
             }
-        }
-
-        if needs_save {
-            data.save().await;
         }
     }
 }
