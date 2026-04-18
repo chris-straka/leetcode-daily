@@ -10,7 +10,6 @@ pub struct GuildData {
     pub channel_id: Option<serenity::ChannelId>,
     pub thread_id: Option<serenity::ChannelId>,
     pub weekly_id: Option<serenity::ChannelId>,
-    pub poll_id: Option<serenity::MessageId>,
     pub active_weekly: bool,
     pub active_daily: bool,
     pub last_daily_date: Option<String>, 
@@ -21,7 +20,6 @@ pub struct GuildData {
 #[serde(default)]
 pub struct Status {
     pub leetcode_username: Option<String>,
-    pub voted_for: Option<serenity::UserId>,
     pub submitted: Option<String>,
     pub weekly_submissions: usize,
     pub monthly_record: u32,

@@ -53,7 +53,6 @@ pub async fn random(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
     let qs = crate::leetcode::fetch_all_questions().await?;
 
-    // RNG is scoped inside this block so it is dropped before the .await below
     let picked = {
         let mut rng = rand::rng();
         qs.choose(&mut rng).cloned()
@@ -68,9 +67,6 @@ pub async fn random(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-#[poise::command(slash_command)]
-pub async fn poll(ctx: Context<'_>) -> Result<(), Error> { ctx.defer().await?; ctx.say("Poll started.").await?; Ok(()) }
-
 #[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
 pub async fn contest_setup(ctx: Context<'_>, channel: serenity::Channel) -> Result<(), Error> {
     ctx.defer().await?;
@@ -80,22 +76,53 @@ pub async fn contest_setup(ctx: Context<'_>, channel: serenity::Channel) -> Resu
     g.weekly_id = Some(channel.id());
     g.active_weekly = true;
     ctx.data().save_from_lock(&db).await;
-    ctx.say("✅ Contests set.").await?; Ok(())
+    ctx.say("✅ Contests set.").await?; 
+    Ok(())
 }
 
 #[poise::command(slash_command)]
 pub async fn ratings(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
     let gid = ctx.guild_id().ok_or("Must be in guild")?;
-    let db = ctx.data().db.read().await;
-    let g = db.get(&gid).ok_or("Server not configured.")?;
     
-    let mut lb: Vec<_> = g.users.iter().filter(|(_, s)| s.contest_rating > 0.0).collect();
-    lb.sort_by(|a, b| b.1.contest_rating.partial_cmp(&a.1.contest_rating).unwrap());
+    let mut users_to_update = Vec::new();
+    {
+        let db = ctx.data().db.read().await;
+        let g = db.get(&gid).ok_or("Server not configured.")?;
+        for (id, u) in &g.users {
+            if let Some(username) = &u.leetcode_username {
+                users_to_update.push((*id, username.clone()));
+            }
+        }
+    }
+
+    let mut updated_ratings = Vec::new();
+    for (id, username) in users_to_update {
+        let rating = crate::leetcode::fetch_user_rating(&username).await.unwrap_or(0.0);
+        updated_ratings.push((id, rating));
+    }
+
+    {
+        let mut db = ctx.data().db.write().await;
+        if let Some(g) = db.get_mut(&gid) {
+            for (id, rating) in &updated_ratings {
+                if let Some(u) = g.users.get_mut(id) {
+                    u.contest_rating = *rating;
+                }
+            }
+        }
+        ctx.data().save_from_lock(&db).await;
+    }
+
+    updated_ratings.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     
     let mut msg = String::from("**🏆 Ratings:**\n");
-    for (p, (id, s)) in lb.into_iter().enumerate() {
-        msg.push_str(&format!("{}. <@{}>: **{:.0}**\n", p+1, id, s.contest_rating));
+    for (p, (id, rating)) in updated_ratings.into_iter().enumerate() {
+        if rating > 0.0 {
+            msg.push_str(&format!("{}. <@{}>: **{:.0}**\n", p+1, id, rating));
+        } else {
+            msg.push_str(&format!("{}. <@{}>: **Unrated**\n", p+1, id));
+        }
     }
     ctx.say(msg).await?;
     Ok(())
@@ -107,8 +134,19 @@ pub async fn daily(ctx: Context<'_>) -> Result<(), Error> {
     let challenge = crate::leetcode::fetch_daily_question().await?;
     let embed = crate::leetcode::create_embed(&challenge.question, &challenge.link);
     
+    let mut content = String::from("☀️ **Today's Daily Challenge:**");
+    
+    if let Some(gid) = ctx.guild_id() {
+        let db = ctx.data().db.read().await;
+        if let Some(g) = db.get(&gid) {
+            if let Some(tid) = g.thread_id {
+                content.push_str(&format!("\n📝 **Discuss here:** <#{}>", tid));
+            }
+        }
+    }
+    
     ctx.send(poise::CreateReply::default()
-        .content("☀️ **Today's Daily Challenge:**")
+        .content(content)
         .embed(embed))
         .await?;
     Ok(())

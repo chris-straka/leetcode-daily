@@ -21,7 +21,6 @@ async fn main() {
                 commands::scores(),
                 commands::random(),
                 commands::channel(),
-                commands::poll(),
                 commands::contest_setup(),
                 commands::ratings(),
                 commands::daily(),

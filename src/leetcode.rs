@@ -19,7 +19,6 @@ pub struct Question {
     pub difficulty: String,
     #[serde(rename = "questionFrontendId")]
     pub id: String,
-    // pub is_paid_only: bool,
     pub title: String,
 }
 
@@ -58,19 +57,47 @@ pub async fn fetch_daily_question() -> Result<DailyChallenge, reqwest::Error> {
 
 #[cached(time = 2500000, result = true)]
 pub async fn fetch_all_questions() -> Result<Vec<Question>, String> {
-    let query = r#"query { questionList(limit: 5000) { data { acRate difficulty questionFrontendId isPaidOnly title } } }"#;
+    let query = r#"query problemsetQuestionList($categorySlug: String, $limit: Int, $skip: Int, $filters: QuestionListFilterInput) {
+  problemsetQuestionList: questionList(
+    categorySlug: $categorySlug
+    limit: $limit
+    skip: $skip
+    filters: $filters
+  ) {
+    questions: data {
+      acRate
+      difficulty
+      questionFrontendId
+      title
+    }
+  }
+}"#;
     let res = Client::new()
         .post(format!("{URL}/graphql"))
         .json(&GqlQuery {
             query: query.into(),
-            variables: json!({}),
+            variables: json!({
+                "categorySlug": "",
+                "skip": 0,
+                "limit": 5000,
+                "filters": {}
+            }),
         })
         .send()
         .await
         .map_err(|e| e.to_string())?;
 
     let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
-    serde_json::from_value(json["data"]["questionList"]["data"].clone()).map_err(|e| e.to_string())
+    
+    if let Some(errors) = json.get("errors") {
+        return Err(format!("GraphQL Errors: {}", errors));
+    }
+
+    let questions_val = json.pointer("/data/problemsetQuestionList/questions")
+        .cloned()
+        .ok_or_else(|| "Failed to parse questions from response".to_string())?;
+
+    serde_json::from_value(questions_val).map_err(|e| e.to_string())
 }
 
 pub fn create_embed(question: &Question, link: &str) -> serenity::CreateEmbed {
