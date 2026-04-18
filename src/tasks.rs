@@ -12,13 +12,17 @@ pub async fn schedule_daily_question(ctx: Arc<serenity::Context>, data: Arc<Data
             let db = data.db.read().await;
             db.iter()
                 .filter(|(_, g)| g.active_daily && g.channel_id.is_some() && g.last_daily_date.as_ref() != Some(&today))
-                .map(|(id, g)| (*id, g.channel_id.unwrap())).collect::<Vec<_>>()
+                .map(|(id, g)| (*id, g.channel_id.unwrap(), g.thread_id)).collect::<Vec<_>>()
         };
 
         if targets.is_empty() { continue; }
         let Ok(challenge) = crate::leetcode::fetch_daily_question().await else { continue; };
 
-        for (guild_id, channel_id) in targets {
+        for (guild_id, channel_id, old_thread_id) in targets {
+            if let Some(old_tid) = old_thread_id {
+                let _ = old_tid.edit_thread(&ctx, serenity::EditThread::new().archived(true).locked(false)).await;
+            }
+
             let embed = crate::leetcode::create_embed(&challenge.question, &challenge.link);
             if let Ok(msg) = channel_id.send_message(&ctx, serenity::CreateMessage::new().content("Daily Question out!").embed(embed)).await {
                 let tid = channel_id.create_thread_from_message(&ctx, msg.id, serenity::CreateThread::new(Utc::now().format("%d/%m/%Y").to_string())).await.map(|t| t.id).ok();
@@ -45,11 +49,10 @@ pub async fn schedule_contests(ctx: Arc<serenity::Context>, data: Arc<Data>) {
         for contest in contests {
             let diff = contest.start_time - now;
             
-            // Tiered alerts (fires once per poll cycle)
             let is_24h = diff > 86100 && diff <= 86400;
             let is_1h = diff > 3300 && diff <= 3600;
             let is_15m = diff > 600 && diff <= 900;
-            let is_start = diff <= 0 && diff > -300; // Only alert for 5 mins after start
+            let is_start = diff <= 0 && diff > -300; 
 
             let guilds = {
                 let db = data.db.read().await;
