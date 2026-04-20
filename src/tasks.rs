@@ -19,8 +19,9 @@ pub async fn schedule_daily_question(ctx: Arc<serenity::Context>, data: Arc<Data
         let Ok(challenge) = crate::leetcode::fetch_daily_question().await else { continue; };
 
         for (guild_id, channel_id, old_thread_id) in targets {
+            // This part now deletes the previous thread permanently
             if let Some(old_tid) = old_thread_id {
-                let _ = old_tid.edit_thread(&ctx, serenity::EditThread::new().archived(true).locked(false)).await;
+                let _ = old_tid.delete(&ctx).await;
             }
 
             let embed = crate::leetcode::create_embed(&challenge.question, &challenge.link);
