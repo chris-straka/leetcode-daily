@@ -24,13 +24,16 @@ pub async fn event_handler(
 
             if CODE_BLOCK_RE.is_match(&msg.content) {
                 let guild_id = msg.guild_id.unwrap();
-                
+
                 let (is_lc_thread, is_nc_thread, username_opt) = {
                     let db = data.db.read().await;
                     if let Some(g) = db.get(&guild_id) {
                         let lc = g.active_leetcode && Some(msg.channel_id) == g.thread_id;
                         let nc = g.active_neetcode && Some(msg.channel_id) == g.neetcode_thread_id;
-                        let uname = g.users.get(&msg.author.id).and_then(|u| u.leetcode_username.clone());
+                        let uname = g
+                            .users
+                            .get(&msg.author.id)
+                            .and_then(|u| u.leetcode_username.clone());
                         (lc, nc, uname)
                     } else {
                         (false, false, None)
@@ -42,7 +45,11 @@ pub async fn event_handler(
                 }
 
                 let Some(username) = username_opt else {
-                    msg.reply(ctx, "❌ Please run `/register <your_leetcode_username>` first!").await?;
+                    msg.reply(
+                        ctx,
+                        "❌ Please run `/register <your_leetcode_username>` first!",
+                    )
+                    .await?;
                     return Ok(());
                 };
 
@@ -60,10 +67,10 @@ pub async fn event_handler(
                     let days = chrono::Utc::now().num_days_from_ce();
                     let index = (days as usize) % crate::neetcode::NEETCODE_250.len();
                     let slug = crate::neetcode::NEETCODE_250[index].to_string();
-                    
-                    let diff = match crate::leetcode::fetch_all_questions().await {
-                        Ok(qs) => qs.into_iter().find(|q| q.title_slug == slug).map(|q| q.difficulty).unwrap_or_else(|| "Medium".to_string()),
-                        Err(_) => "Medium".to_string()
+
+                    let diff = match crate::leetcode::fetch_question_by_slug(&slug).await {
+                        Ok(q) => q.difficulty,
+                        Err(_) => "Medium".to_string(),
                     };
                     (slug, diff)
                 };
@@ -71,7 +78,8 @@ pub async fn event_handler(
                 let subs = match crate::leetcode::fetch_recent_ac_submissions(&username).await {
                     Ok(s) => s,
                     Err(_) => {
-                        msg.reply(ctx, "Error fetching your profile. Is it public?").await?;
+                        msg.reply(ctx, "Error fetching your profile. Is it public?")
+                            .await?;
                         return Ok(());
                     }
                 };
@@ -86,13 +94,25 @@ pub async fn event_handler(
                 let mut db = data.db.write().await;
                 let guild_data = db.entry(guild_id).or_default();
 
-                let solvers_so_far = guild_data.users.values().filter(|u| {
-                    if is_lc_thread { u.submitted.is_some() } else { u.nc_submitted.is_some() }
-                }).count();
+                let solvers_so_far = guild_data
+                    .users
+                    .values()
+                    .filter(|u| {
+                        if is_lc_thread {
+                            u.submitted.is_some()
+                        } else {
+                            u.nc_submitted.is_some()
+                        }
+                    })
+                    .count();
 
                 let user = guild_data.users.entry(msg.author.id).or_default();
-                let already_submitted = if is_lc_thread { user.submitted.is_some() } else { user.nc_submitted.is_some() };
-                
+                let already_submitted = if is_lc_thread {
+                    user.submitted.is_some()
+                } else {
+                    user.nc_submitted.is_some()
+                };
+
                 if !already_submitted {
                     let base_score = match difficulty.as_str() {
                         "Easy" => 1,
@@ -103,10 +123,14 @@ pub async fn event_handler(
 
                     let mut total_gain = base_score;
                     if solvers_so_far == 0 {
-                        total_gain += 1; // 🥇 Extra point for the first person
+                        total_gain += 1;
                     }
 
-                    if is_lc_thread { user.submitted = Some(msg.link()); } else { user.nc_submitted = Some(msg.link()); }
+                    if is_lc_thread {
+                        user.submitted = Some(msg.link());
+                    } else {
+                        user.nc_submitted = Some(msg.link());
+                    }
                     user.monthly_record += 1;
                     user.score += total_gain;
                     user.days_missed = 0;
