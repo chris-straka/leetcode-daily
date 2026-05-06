@@ -91,16 +91,48 @@ pub async fn fetch_all_questions() -> Result<Vec<Question>, String> {
         .map_err(|e| e.to_string())?;
 
     let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
-    
+
     if let Some(errors) = json.get("errors") {
         return Err(format!("GraphQL Errors: {}", errors));
     }
 
-    let questions_val = json.pointer("/data/problemsetQuestionList/questions")
+    let questions_val = json
+        .pointer("/data/problemsetQuestionList/questions")
         .cloned()
         .ok_or_else(|| "Failed to parse questions from response".to_string())?;
 
     serde_json::from_value(questions_val).map_err(|e| e.to_string())
+}
+
+pub async fn fetch_question_by_slug(slug: &str) -> Result<Question, String> {
+    let query = r#"query questionData($titleSlug: String!) {
+        question(titleSlug: $titleSlug) {
+            questionFrontendId
+            title
+            titleSlug
+            difficulty
+            acRate
+        }
+    }"#;
+
+    let res = Client::new()
+        .post(format!("{URL}/graphql"))
+        .json(&GqlQuery {
+            query: query.into(),
+            variables: json!({ "titleSlug": slug }),
+        })
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+
+    let q_val = json
+        .get("data")
+        .and_then(|d| d.get("question"))
+        .ok_or_else(|| "Question not found".to_string())?;
+
+    serde_json::from_value(q_val.clone()).map_err(|e| e.to_string())
 }
 
 pub fn create_embed(question: &Question, link: &str) -> serenity::CreateEmbed {
