@@ -20,6 +20,8 @@ pub struct Question {
     #[serde(rename = "questionFrontendId")]
     pub id: String,
     pub title: String,
+    #[serde(default)]
+    pub title_slug: String,
 }
 
 #[derive(Deserialize)]
@@ -40,7 +42,7 @@ pub struct DailyChallenge {
 }
 
 pub async fn fetch_daily_question() -> Result<DailyChallenge, reqwest::Error> {
-    let query = r#"query { activeDailyCodingChallengeQuestion { link question { acRate difficulty questionFrontendId isPaidOnly title } } }"#;
+    let query = r#"query { activeDailyCodingChallengeQuestion { link question { acRate difficulty questionFrontendId isPaidOnly title titleSlug } } }"#;
     let res: DailyResponse = Client::new()
         .post(format!("{URL}/graphql"))
         .json(&GqlQuery {
@@ -69,6 +71,7 @@ pub async fn fetch_all_questions() -> Result<Vec<Question>, String> {
       difficulty
       questionFrontendId
       title
+      titleSlug
     }
   }
 }"#;

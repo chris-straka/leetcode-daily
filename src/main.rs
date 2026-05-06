@@ -2,6 +2,7 @@ mod commands;
 mod events;
 mod leetcode;
 mod models;
+mod neetcode;
 mod tasks;
 
 use poise::serenity_prelude as serenity;
@@ -21,9 +22,11 @@ async fn main() {
                 commands::scores(),
                 commands::random(),
                 commands::channel(),
+                commands::toggle(),
                 commands::contest_setup(),
                 commands::ratings(),
                 commands::daily(),
+                commands::neetcode(),
                 commands::contests(),
             ],
             event_handler: |ctx, event, framework, data| {
@@ -61,6 +64,12 @@ async fn main() {
                 let t2_ctx = Arc::new(ctx.clone());
                 tokio::spawn(async move {
                     tasks::schedule_contests(t2_ctx, t2_data).await;
+                });
+
+                let t3_data = Arc::new(data.clone());
+                let t3_ctx = Arc::new(ctx.clone());
+                tokio::spawn(async move {
+                    tasks::schedule_neetcode_daily(t3_ctx, t3_data).await;
                 });
 
                 Ok(data)

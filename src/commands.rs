@@ -1,6 +1,7 @@
 use crate::models::{Context, Error};
 use poise::serenity_prelude as serenity;
 use rand::seq::IndexedRandom;
+use chrono::Datelike;
 
 #[poise::command(slash_command)]
 pub async fn scores(ctx: Context<'_>) -> Result<(), Error> {
@@ -28,10 +29,34 @@ pub async fn channel(ctx: Context<'_>, channel: serenity::Channel) -> Result<(),
         let mut db = ctx.data().db.write().await;
         let g = db.entry(gid).or_default();
         g.channel_id = Some(channel.id());
-        g.active_daily = true;
+        g.active_leetcode = true;
     }
     ctx.data().save().await;
-    ctx.say(format!("✅ Configured to <#{}>", channel.id())).await?;
+    ctx.say(format!("✅ Configured to <#{}>. Leetcode daily enabled. Use `/toggle` to enable NeetCode 250.", channel.id())).await?;
+    Ok(())
+}
+
+#[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
+pub async fn toggle(
+    ctx: Context<'_>, 
+    #[description = "Toggle LeetCode Daily"] leetcode: Option<bool>,
+    #[description = "Toggle NeetCode 250 Daily"] neetcode: Option<bool>
+) -> Result<(), Error> {
+    ctx.defer().await?;
+    let gid = ctx.guild_id().unwrap();
+    
+    let (lc_status, nc_status) = {
+        let mut db = ctx.data().db.write().await;
+        let g = db.entry(gid).or_default();
+        if let Some(lc) = leetcode { g.active_leetcode = lc; }
+        if let Some(nc) = neetcode { g.active_neetcode = nc; }
+        let lc_status = g.active_leetcode;
+        let nc_status = g.active_neetcode;
+        ctx.data().save_from_lock(&db).await;
+        (lc_status, nc_status)
+    };
+    
+    ctx.say(format!("✅ Settings updated:\n- LeetCode Daily: **{}**\n- NeetCode 250 Daily: **{}**", lc_status, nc_status)).await?;
     Ok(())
 }
 
@@ -59,7 +84,7 @@ pub async fn random(ctx: Context<'_>) -> Result<(), Error> {
     };
 
     if let Some(q) = picked {
-        let link = format!("/problems/{}", q.title.to_lowercase().replace(' ', "-"));
+        let link = format!("/problems/{}", q.title_slug);
         ctx.send(poise::CreateReply::default().embed(crate::leetcode::create_embed(&q, &link))).await?;
     } else {
         ctx.say("No questions found.").await?;
@@ -134,7 +159,7 @@ pub async fn daily(ctx: Context<'_>) -> Result<(), Error> {
     let challenge = crate::leetcode::fetch_daily_question().await?;
     let embed = crate::leetcode::create_embed(&challenge.question, &challenge.link);
     
-    let mut content = String::from("☀️ **Today's Daily Challenge:**");
+    let mut content = String::from("☀️ **Today's LeetCode Daily:**");
     
     if let Some(gid) = ctx.guild_id() {
         let db = ctx.data().db.read().await;
@@ -149,6 +174,33 @@ pub async fn daily(ctx: Context<'_>) -> Result<(), Error> {
         .content(content)
         .embed(embed))
         .await?;
+    Ok(())
+}
+
+#[poise::command(slash_command)]
+pub async fn neetcode(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
+    let days = chrono::Utc::now().num_days_from_ce();
+    let index = (days as usize) % crate::neetcode::NEETCODE_250.len();
+    let slug = crate::neetcode::NEETCODE_250[index];
+
+    let all_qs = crate::leetcode::fetch_all_questions().await.map_err(|_| "Failed to fetch")?;
+    let question = all_qs.into_iter().find(|q| q.title_slug == slug).ok_or("Question not found")?;
+    let link = format!("/problems/{}/", slug);
+
+    let embed = crate::leetcode::create_embed(&question, &link);
+    let mut content = String::from("🎯 **Today's NeetCode 250 Daily:**");
+    
+    if let Some(gid) = ctx.guild_id() {
+        let db = ctx.data().db.read().await;
+        if let Some(g) = db.get(&gid) {
+            if let Some(tid) = g.neetcode_thread_id {
+                content.push_str(&format!("\n📝 **Discuss here:** <#{}>", tid));
+            }
+        }
+    }
+    
+    ctx.send(poise::CreateReply::default().content(content).embed(embed)).await?;
     Ok(())
 }
 

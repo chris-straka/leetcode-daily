@@ -9,10 +9,14 @@ pub struct GuildData {
     pub users: HashMap<serenity::UserId, Status>,
     pub channel_id: Option<serenity::ChannelId>,
     pub thread_id: Option<serenity::ChannelId>,
+    pub neetcode_thread_id: Option<serenity::ChannelId>,
     pub weekly_id: Option<serenity::ChannelId>,
     pub active_weekly: bool,
-    pub active_daily: bool,
+    #[serde(alias = "active_daily")]
+    pub active_leetcode: bool,
+    pub active_neetcode: bool,
     pub last_daily_date: Option<String>, 
+    pub last_neetcode_date: Option<String>,
     pub alerted_contests: Vec<String>,   
 }
 
@@ -21,6 +25,7 @@ pub struct GuildData {
 pub struct Status {
     pub leetcode_username: Option<String>,
     pub submitted: Option<String>,
+    pub nc_submitted: Option<String>,
     pub weekly_submissions: usize,
     pub monthly_record: u32,
     pub days_missed: u32,

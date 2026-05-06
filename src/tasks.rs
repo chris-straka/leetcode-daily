@@ -11,7 +11,7 @@ pub async fn schedule_daily_question(ctx: Arc<serenity::Context>, data: Arc<Data
         let targets = {
             let db = data.db.read().await;
             db.iter()
-                .filter(|(_, g)| g.active_daily && g.channel_id.is_some() && g.last_daily_date.as_ref() != Some(&today))
+                .filter(|(_, g)| g.active_leetcode && g.channel_id.is_some() && g.last_daily_date.as_ref() != Some(&today))
                 .map(|(id, g)| (*id, g.channel_id.unwrap(), g.thread_id)).collect::<Vec<_>>()
         };
 
@@ -19,14 +19,13 @@ pub async fn schedule_daily_question(ctx: Arc<serenity::Context>, data: Arc<Data
         let Ok(challenge) = crate::leetcode::fetch_daily_question().await else { continue; };
 
         for (guild_id, channel_id, old_thread_id) in targets {
-            // This part now deletes the previous thread permanently
             if let Some(old_tid) = old_thread_id {
                 let _ = old_tid.delete(&ctx).await;
             }
 
             let embed = crate::leetcode::create_embed(&challenge.question, &challenge.link);
-            if let Ok(msg) = channel_id.send_message(&ctx, serenity::CreateMessage::new().content("Daily Question out!").embed(embed)).await {
-                let tid = channel_id.create_thread_from_message(&ctx, msg.id, serenity::CreateThread::new(Utc::now().format("%d/%m/%Y").to_string())).await.map(|t| t.id).ok();
+            if let Ok(msg) = channel_id.send_message(&ctx, serenity::CreateMessage::new().content("LeetCode Daily is out!").embed(embed)).await {
+                let tid = channel_id.create_thread_from_message(&ctx, msg.id, serenity::CreateThread::new(format!("LeetCode - {}", Utc::now().format("%d/%m/%Y")))).await.map(|t| t.id).ok();
                 if let Some(t) = tid { let _ = t.say(&ctx, "Paste solution in a code block to earn points!").await; }
 
                 let mut db = data.db.write().await;
@@ -34,6 +33,54 @@ pub async fn schedule_daily_question(ctx: Arc<serenity::Context>, data: Arc<Data
                     g.thread_id = tid;
                     g.last_daily_date = Some(today.clone());
                     for u in g.users.values_mut() { if u.submitted.is_none() { u.score = u.score.saturating_sub(1); } u.submitted = None; }
+                }
+                data.save_from_lock(&db).await;
+            }
+        }
+    }
+}
+
+pub async fn schedule_neetcode_daily(ctx: Arc<serenity::Context>, data: Arc<Data>) {
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        
+        let targets = {
+            let db = data.db.read().await;
+            db.iter()
+                .filter(|(_, g)| g.active_neetcode && g.channel_id.is_some() && g.last_neetcode_date.as_ref() != Some(&today))
+                .map(|(id, g)| (*id, g.channel_id.unwrap(), g.neetcode_thread_id)).collect::<Vec<_>>()
+        };
+
+        if targets.is_empty() { continue; }
+
+        use chrono::Datelike;
+        let days = Utc::now().num_days_from_ce();
+        let index = (days as usize) % crate::neetcode::NEETCODE_250.len();
+        let slug = crate::neetcode::NEETCODE_250[index];
+
+        let Ok(all_qs) = crate::leetcode::fetch_all_questions().await else { continue; };
+        let Some(question) = all_qs.into_iter().find(|q| q.title_slug == slug) else { continue; };
+        let link = format!("/problems/{}/", slug);
+
+        for (guild_id, channel_id, old_thread_id) in targets {
+            if let Some(old_tid) = old_thread_id {
+                let _ = old_tid.delete(&ctx).await;
+            }
+
+            let embed = crate::leetcode::create_embed(&question, &link);
+            if let Ok(msg) = channel_id.send_message(&ctx, serenity::CreateMessage::new().content("NeetCode 250 Daily is out!").embed(embed)).await {
+                let tid = channel_id.create_thread_from_message(&ctx, msg.id, serenity::CreateThread::new(format!("NeetCode - {}", Utc::now().format("%d/%m/%Y")))).await.map(|t| t.id).ok();
+                if let Some(t) = tid { let _ = t.say(&ctx, "Paste solution in a code block to earn points!").await; }
+
+                let mut db = data.db.write().await;
+                if let Some(g) = db.get_mut(&guild_id) {
+                    g.neetcode_thread_id = tid;
+                    g.last_neetcode_date = Some(today.clone());
+                    for u in g.users.values_mut() { 
+                        if u.nc_submitted.is_none() { u.score = u.score.saturating_sub(1); } 
+                        u.nc_submitted = None; 
+                    }
                 }
                 data.save_from_lock(&db).await;
             }

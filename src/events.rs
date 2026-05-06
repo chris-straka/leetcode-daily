@@ -18,25 +18,26 @@ pub async fn event_handler(
             }
 
             if msg.mentions_me(ctx).await.unwrap_or(false) {
-                msg.reply(ctx, "👋 I'm awake! Use `/daily` for the link or `/scores` for the leaderboard.").await?;
+                msg.reply(ctx, "👋 I'm awake! Use `/daily` or `/neetcode` for the links, or `/scores` for the leaderboard.").await?;
                 return Ok(());
             }
 
             if CODE_BLOCK_RE.is_match(&msg.content) {
                 let guild_id = msg.guild_id.unwrap();
                 
-                let (is_thread, username_opt) = {
+                let (is_lc_thread, is_nc_thread, username_opt) = {
                     let db = data.db.read().await;
                     if let Some(g) = db.get(&guild_id) {
-                        let is_th = g.active_daily && Some(msg.channel_id) == g.thread_id;
+                        let lc = g.active_leetcode && Some(msg.channel_id) == g.thread_id;
+                        let nc = g.active_neetcode && Some(msg.channel_id) == g.neetcode_thread_id;
                         let uname = g.users.get(&msg.author.id).and_then(|u| u.leetcode_username.clone());
-                        (is_th, uname)
+                        (lc, nc, uname)
                     } else {
-                        (false, None)
+                        (false, false, None)
                     }
                 };
 
-                if !is_thread {
+                if !is_lc_thread && !is_nc_thread {
                     return Ok(());
                 }
 
@@ -45,15 +46,27 @@ pub async fn event_handler(
                     return Ok(());
                 };
 
-                let daily = match crate::leetcode::fetch_daily_question().await {
-                    Ok(d) => d,
-                    Err(_) => {
-                        msg.reply(ctx, "Error contacting LeetCode API.").await?;
-                        return Ok(());
-                    }
+                let (target_slug, difficulty) = if is_lc_thread {
+                    let daily = match crate::leetcode::fetch_daily_question().await {
+                        Ok(d) => d,
+                        Err(_) => {
+                            msg.reply(ctx, "Error contacting LeetCode API.").await?;
+                            return Ok(());
+                        }
+                    };
+                    (daily.question.title_slug, daily.question.difficulty)
+                } else {
+                    use chrono::Datelike;
+                    let days = chrono::Utc::now().num_days_from_ce();
+                    let index = (days as usize) % crate::neetcode::NEETCODE_250.len();
+                    let slug = crate::neetcode::NEETCODE_250[index].to_string();
+                    
+                    let diff = match crate::leetcode::fetch_all_questions().await {
+                        Ok(qs) => qs.into_iter().find(|q| q.title_slug == slug).map(|q| q.difficulty).unwrap_or_else(|| "Medium".to_string()),
+                        Err(_) => "Medium".to_string()
+                    };
+                    (slug, diff)
                 };
-
-                let daily_slug = daily.link.trim_matches('/').split('/').last().unwrap_or_default();
 
                 let subs = match crate::leetcode::fetch_recent_ac_submissions(&username).await {
                     Ok(s) => s,
@@ -63,29 +76,37 @@ pub async fn event_handler(
                     }
                 };
 
-                let is_accepted = subs.iter().any(|sub| sub.title_slug == daily_slug);
+                let is_accepted = subs.iter().any(|sub| sub.title_slug == target_slug);
 
                 if !is_accepted {
-                    msg.reply(ctx, "❌ Couldn't find an Accepted submission for today's daily! (Wait a few seconds after submitting to LeetCode).").await?;
+                    msg.reply(ctx, "❌ Couldn't find an Accepted submission! (Wait a few seconds after submitting to LeetCode).").await?;
                     return Ok(());
                 }
 
                 let mut db = data.db.write().await;
                 let guild_data = db.entry(guild_id).or_default();
 
-                let solvers_so_far = guild_data.users.values().filter(|u| u.submitted.is_some()).count();
+                let solvers_so_far = guild_data.users.values().filter(|u| {
+                    if is_lc_thread { u.submitted.is_some() } else { u.nc_submitted.is_some() }
+                }).count();
+
                 let user = guild_data.users.entry(msg.author.id).or_default();
+                let already_submitted = if is_lc_thread { user.submitted.is_some() } else { user.nc_submitted.is_some() };
                 
-                if user.submitted.is_none() {
-                    let base_score = match daily.question.difficulty.as_str() {
+                if !already_submitted {
+                    let base_score = match difficulty.as_str() {
                         "Easy" => 1,
                         "Medium" => 2,
                         "Hard" => 3,
                         _ => 1,
                     };
 
-                    let total_gain = base_score;
-                    user.submitted = Some(msg.link());
+                    let mut total_gain = base_score;
+                    if solvers_so_far == 0 {
+                        total_gain += 1; // 🥇 Extra point for the first person
+                    }
+
+                    if is_lc_thread { user.submitted = Some(msg.link()); } else { user.nc_submitted = Some(msg.link()); }
                     user.monthly_record += 1;
                     user.score += total_gain;
                     user.days_missed = 0;
@@ -93,15 +114,15 @@ pub async fn event_handler(
                     if solvers_so_far == 0 {
                         if let Some(main_channel) = guild_data.channel_id {
                             let announcement = format!(
-                                "🥇 **<@{}>** is the first to solve today's daily!",
-                                msg.author.id
+                                "🥇 **<@{}>** is the first to solve today's {} daily! (+1 bonus pt)",
+                                msg.author.id,
+                                if is_lc_thread { "LeetCode" } else { "NeetCode" }
                             );
                             let _ = main_channel.say(&ctx.http, announcement).await;
                         }
                     }
 
                     let response = format!("✅ Verified via API! +**{}** pts.", total_gain);
-
                     msg.reply(ctx, response).await?;
                     data.save_from_lock(&db).await;
                 }
