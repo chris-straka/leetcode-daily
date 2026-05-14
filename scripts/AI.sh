@@ -10,6 +10,7 @@ FILES=(
   "src/leetcode.rs"
   "src/main.rs"
   "src/models.rs"
+  "src/neetcode.rs"
   "src/tasks.rs"
   "Cargo.toml"
 )

@@ -5,6 +5,11 @@ use std::sync::LazyLock;
 
 static CODE_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)```.+```").unwrap());
 
+// Regex to catch Instagram Reels, Posts, or TV links
+static IG_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"https?://(?:www\.)?instagram\.com/(?:reels?|p|tv)/[A-Za-z0-9_-]+").unwrap()
+});
+
 pub async fn event_handler(
     ctx: &serenity::Context,
     event: &serenity::FullEvent,
@@ -17,11 +22,16 @@ pub async fn event_handler(
                 return Ok(());
             }
 
-            if msg.mentions_me(ctx).await.unwrap_or(false) {
-                msg.reply(ctx, "👋 I'm awake! Use `/daily` or `/neetcode` for the links, or `/scores` for the leaderboard.").await?;
-                return Ok(());
+            // --- INSTAGRAM EMBED FIXER ---
+            // This detects Instagram links and replies with a vxinstagram proxy link
+            // so that users without accounts can view the video in Discord.
+            if let Some(caps) = IG_RE.captures(&msg.content) {
+                let original_url = caps.get(0).unwrap().as_str();
+                let fixed_url = original_url.replace("instagram.com", "vxinstagram.com");
+                let _ = msg.reply(ctx, format!("{}", fixed_url)).await;
             }
 
+            // --- LEETCODE SCORING LOGIC ---
             if CODE_BLOCK_RE.is_match(&msg.content) {
                 let guild_id = msg.guild_id.unwrap();
 
