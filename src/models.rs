@@ -5,6 +5,14 @@ use std::sync::Arc;
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 #[serde(default)]
+pub struct MonthlyWinner {
+    pub month_year: String,
+    pub user_ids: Vec<serenity::UserId>,
+    pub score: usize,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct GuildData {
     pub users: HashMap<serenity::UserId, Status>,
     pub channel_id: Option<serenity::ChannelId>,
@@ -17,7 +25,9 @@ pub struct GuildData {
     pub active_neetcode: bool,
     pub last_daily_date: Option<String>, 
     pub last_neetcode_date: Option<String>,
-    pub alerted_contests: Vec<String>,   
+    pub alerted_contests: Vec<String>,
+    pub last_processed_month: Option<u32>,
+    pub monthly_winners: Vec<MonthlyWinner>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]

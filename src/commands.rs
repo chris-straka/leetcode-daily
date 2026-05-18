@@ -4,6 +4,41 @@ use poise::serenity_prelude as serenity;
 use rand::seq::IndexedRandom;
 
 #[poise::command(slash_command)]
+pub async fn winners(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
+    let gid = ctx.guild_id().ok_or("Must be in guild")?;
+    let db = ctx.data().db.read().await;
+    let g = db.get(&gid).ok_or("Run /channel first")?;
+
+    if g.monthly_winners.is_empty() {
+        ctx.say("No Leetcoder of the Month winners yet!").await?;
+        return Ok(());
+    }
+
+    let mut msg = String::from("**🏆 Leetcoder of the Month Winners:**\n");
+    let skip = g.monthly_winners.len().saturating_sub(20);
+    for winner in g.monthly_winners.iter().skip(skip) {
+        if !winner.user_ids.is_empty() {
+            let users_str = winner
+                .user_ids
+                .iter()
+                .map(|id| format!("<@{}>", id))
+                .collect::<Vec<_>>()
+                .join(", ");
+            msg.push_str(&format!(
+                "• **{}**: {} ({} pts)\n",
+                winner.month_year, users_str, winner.score
+            ));
+        } else {
+            msg.push_str(&format!("• **{}**: No winner\n", winner.month_year));
+        }
+    }
+
+    ctx.say(msg).await?;
+    Ok(())
+}
+
+#[poise::command(slash_command)]
 pub async fn scores(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
     let gid = ctx.guild_id().ok_or("Must be in guild")?;

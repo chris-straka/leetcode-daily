@@ -3,6 +3,81 @@ use chrono::Utc;
 use poise::serenity_prelude as serenity;
 use std::sync::Arc;
 
+pub async fn schedule_monthly_winner(ctx: Arc<serenity::Context>, data: Arc<Data>) {
+    loop {
+        let now = chrono::Utc::now();
+        use chrono::Datelike;
+        let current_month = now.month();
+
+        let mut changed = false;
+        {
+            let mut db = data.db.write().await;
+            for (_, g) in db.iter_mut() {
+                if g.last_processed_month.is_none() {
+                    // Start tracking this month instead of instantly resetting newly added servers
+                    g.last_processed_month = Some(current_month);
+                    changed = true;
+                    continue;
+                }
+
+                if let Some(last_month) = g.last_processed_month {
+                    if last_month != current_month {
+                        let prev_year = if last_month > current_month { now.year() - 1 } else { now.year() };
+                        let month_names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+                        let prev_month_name = format!("{} {}", month_names[(last_month - 1) as usize], prev_year);
+
+                        let mut best_score = 0;
+                        for status in g.users.values() {
+                            if status.score > best_score {
+                                best_score = status.score;
+                            }
+                        }
+
+                        let mut best_users = Vec::new();
+                        if best_score > 0 {
+                            for (uid, status) in &g.users {
+                                if status.score == best_score {
+                                    best_users.push(*uid);
+                                }
+                            }
+                        }
+
+                        g.monthly_winners.push(crate::models::MonthlyWinner {
+                            month_year: prev_month_name.clone(),
+                            user_ids: best_users.clone(),
+                            score: best_score,
+                        });
+
+                        if let Some(cid) = g.channel_id {
+                            let msg = if !best_users.is_empty() {
+                                let users_str = best_users.iter().map(|id| format!("<@{}>", id)).collect::<Vec<_>>().join(", ");
+                                format!("🏆 **Leetcoder of the Month** for {} is {} with **{}** points! Scores have been reset.", prev_month_name, users_str, best_score)
+                            } else {
+                                format!("🏆 No one scored points in {}! Scores have been reset.", prev_month_name)
+                            };
+                            let _ = cid.say(&ctx.http, msg).await;
+                        }
+
+                        // Reset Scores
+                        for status in g.users.values_mut() {
+                            status.score = 0;
+                            status.monthly_record = 0;
+                        }
+
+                        g.last_processed_month = Some(current_month);
+                        changed = true;
+                    }
+                }
+            }
+            if changed {
+                data.save_from_lock(&db).await;
+            }
+        }
+        
+        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+    }
+}
+
 pub async fn schedule_daily_question(ctx: Arc<serenity::Context>, data: Arc<Data>) {
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;

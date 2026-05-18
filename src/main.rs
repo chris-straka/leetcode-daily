@@ -28,6 +28,7 @@ async fn main() {
                 commands::daily(),
                 commands::neetcode(),
                 commands::contests(),
+                commands::winners(),
             ],
             event_handler: |ctx, event, framework, data| {
                 Box::pin(events::event_handler(ctx, event, framework, data))
@@ -70,6 +71,12 @@ async fn main() {
                 let t3_ctx = Arc::new(ctx.clone());
                 tokio::spawn(async move {
                     tasks::schedule_neetcode_daily(t3_ctx, t3_data).await;
+                });
+
+                let t4_data = Arc::new(data.clone());
+                let t4_ctx = Arc::new(ctx.clone());
+                tokio::spawn(async move {
+                    tasks::schedule_monthly_winner(t4_ctx, t4_data).await;
                 });
 
                 Ok(data)
