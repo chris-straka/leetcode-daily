@@ -1,7 +1,7 @@
 use poise::serenity_prelude as serenity;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 #[serde(default)]
@@ -50,6 +50,8 @@ pub struct Status {
 #[derive(Debug, Clone)]
 pub struct Data {
     pub db: Arc<tokio::sync::RwLock<HashMap<serenity::GuildId, GuildData>>>,
+    // In-memory set to prevent concurrent checks for the same user
+    pub processing: Arc<Mutex<HashSet<(serenity::GuildId, serenity::UserId, String)>>>,
 }
 
 impl Data {

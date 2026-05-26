@@ -53,6 +53,7 @@ async fn main() {
                     db: Arc::new(tokio::sync::RwLock::new(
                         serde_json::from_str(&db_content).unwrap_or_default(),
                     )),
+                    processing: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
                 };
 
                 let t1_data = Arc::new(data.clone());

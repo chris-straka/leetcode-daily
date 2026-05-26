@@ -1,13 +1,12 @@
 #!/bin/bash
 
-# Name of the screen session
 SESSION="bot"
 
-# 1. Kill the existing screen session if it exists
+# 1. Kill existing screen session and any lingering bot processes
 screen -S "$SESSION" -X quit 2>/dev/null
+killall leetcode-daily 2>/dev/null
 
-# 2. Start a new detached screen session and run the bot
-# -d -m starts it in detached mode immediately
+# 2. Build and run the bot
 screen -dmS "$SESSION" cargo run
 
 echo "🚀 Bot is compiling and starting in screen: $SESSION"

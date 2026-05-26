@@ -1,7 +1,7 @@
 use crate::models::{Data, Error};
 use poise::serenity_prelude as serenity;
 use regex::Regex;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 pub static CODE_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)```.+```").unwrap());
 
@@ -9,6 +9,21 @@ pub static CODE_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)``
 static IG_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"https?://(?:www\.)?instagram\.com/(?:reels?|p|tv)/[A-Za-z0-9_-]+").unwrap()
 });
+
+struct ProcessingGuard {
+    guild_id: serenity::GuildId,
+    user_id: serenity::UserId,
+    thread_type: String,
+    processing: Arc<std::sync::Mutex<std::collections::HashSet<(serenity::GuildId, serenity::UserId, String)>>>,
+}
+
+impl Drop for ProcessingGuard {
+    fn drop(&mut self) {
+        if let Ok(mut processing) = self.processing.lock() {
+            processing.remove(&(self.guild_id, self.user_id, self.thread_type.clone()));
+        }
+    }
+}
 
 pub async fn process_solution_message(
     ctx: &serenity::Context,
@@ -46,6 +61,26 @@ pub async fn process_solution_message(
         return Ok(());
     }
 
+    let thread_type = if is_lc_thread { "leetcode" } else { "neetcode" };
+
+    // Prevent concurrent checks
+    {
+        let mut processing = data.processing.lock().unwrap();
+        let key = (guild_id, msg.author.id, thread_type.to_string());
+        if processing.contains(&key) {
+            return Ok(());
+        }
+        processing.insert(key);
+    }
+
+    // Auto-remove processing lock when function completes or errors
+    let _guard = ProcessingGuard {
+        guild_id,
+        user_id: msg.author.id,
+        thread_type: thread_type.to_string(),
+        processing: data.processing.clone(),
+    };
+
     let Some(username) = username_opt else {
         let _ = msg.reply(
             ctx,
@@ -57,8 +92,11 @@ pub async fn process_solution_message(
     let (target_slug, difficulty) = if is_lc_thread {
         let (db_slug, db_diff) = {
             let db = data.db.read().await;
-            let g = db.get(&guild_id).unwrap();
-            (g.last_daily_slug.clone(), g.last_daily_diff.clone())
+            if let Some(g) = db.get(&guild_id) {
+                (g.last_daily_slug.clone(), g.last_daily_diff.clone())
+            } else {
+                (None, None)
+            }
         };
         
         if let (Some(s), Some(d)) = (db_slug, db_diff) {
@@ -76,8 +114,11 @@ pub async fn process_solution_message(
     } else {
         let (db_slug, db_diff) = {
             let db = data.db.read().await;
-            let g = db.get(&guild_id).unwrap();
-            (g.last_neetcode_slug.clone(), g.last_neetcode_diff.clone())
+            if let Some(g) = db.get(&guild_id) {
+                (g.last_neetcode_slug.clone(), g.last_neetcode_diff.clone())
+            } else {
+                (None, None)
+            }
         };
         
         if let (Some(s), Some(d)) = (db_slug, db_diff) {

@@ -6,7 +6,7 @@ use rand::seq::IndexedRandom;
 #[poise::command(slash_command)]
 pub async fn winners(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
-    let gid = ctx.guild_id().ok_or("Must be in guild")?;
+    let gid = ctx.guild_id().ok_or("Must be in a server.")?;
     let db = ctx.data().db.read().await;
     let g = db.get(&gid).ok_or("Run /channel first")?;
 
@@ -41,7 +41,7 @@ pub async fn winners(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command)]
 pub async fn scores(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
-    let gid = ctx.guild_id().ok_or("Must be in guild")?;
+    let gid = ctx.guild_id().ok_or("Must be in a server.")?;
     let db = ctx.data().db.read().await;
     let g = db.get(&gid).ok_or("Run /channel first")?;
 
@@ -61,7 +61,7 @@ pub async fn scores(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
 pub async fn channel(ctx: Context<'_>, channel: serenity::Channel) -> Result<(), Error> {
     ctx.defer().await?;
-    let gid = ctx.guild_id().unwrap();
+    let gid = ctx.guild_id().ok_or("Must be in a server.")?;
     {
         let mut db = ctx.data().db.write().await;
         let g = db.entry(gid).or_default();
@@ -84,7 +84,7 @@ pub async fn toggle(
     #[description = "Toggle NeetCode 250 Daily"] neetcode: Option<bool>,
 ) -> Result<(), Error> {
     ctx.defer().await?;
-    let gid = ctx.guild_id().unwrap();
+    let gid = ctx.guild_id().ok_or("Must be in a server.")?;
 
     let (lc_status, nc_status) = {
         let mut db = ctx.data().db.write().await;
@@ -112,12 +112,14 @@ pub async fn toggle(
 #[poise::command(slash_command)]
 pub async fn register(ctx: Context<'_>, username: String) -> Result<(), Error> {
     ctx.defer().await?;
+    let gid = ctx.guild_id().ok_or("Must be in a server.")?;
     let rating = crate::leetcode::fetch_user_rating(&username)
         .await
         .unwrap_or(0.0);
+    
     let mut db = ctx.data().db.write().await;
     let u = db
-        .entry(ctx.guild_id().unwrap())
+        .entry(gid)
         .or_default()
         .users
         .entry(ctx.author().id)
@@ -125,6 +127,7 @@ pub async fn register(ctx: Context<'_>, username: String) -> Result<(), Error> {
     u.leetcode_username = Some(username.clone());
     u.contest_rating = rating;
     ctx.data().save_from_lock(&db).await;
+    
     ctx.say(format!(
         "✅ Linked **{}** (Rating: {:.0})",
         username, rating
@@ -156,7 +159,7 @@ pub async fn random(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
 pub async fn contest_setup(ctx: Context<'_>, channel: serenity::Channel) -> Result<(), Error> {
     ctx.defer().await?;
-    let gid = ctx.guild_id().unwrap();
+    let gid = ctx.guild_id().ok_or("Must be in a server.")?;
     let mut db = ctx.data().db.write().await;
     let g = db.entry(gid).or_default();
     g.weekly_id = Some(channel.id());
@@ -169,7 +172,7 @@ pub async fn contest_setup(ctx: Context<'_>, channel: serenity::Channel) -> Resu
 #[poise::command(slash_command)]
 pub async fn ratings(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
-    let gid = ctx.guild_id().ok_or("Must be in guild")?;
+    let gid = ctx.guild_id().ok_or("Must be in a server.")?;
 
     let mut users_to_update = Vec::new();
     {
