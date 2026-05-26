@@ -78,6 +78,13 @@ async fn main() {
                 tokio::spawn(async move {
                     tasks::schedule_monthly_winner(t4_ctx, t4_data).await;
                 });
+                
+                // Spawn catch-up tasks
+                let t5_data = Arc::new(data.clone());
+                let t5_ctx = Arc::new(ctx.clone());
+                tokio::spawn(async move {
+                    tasks::schedule_catchup(t5_ctx, t5_data).await;
+                });
 
                 Ok(data)
             })

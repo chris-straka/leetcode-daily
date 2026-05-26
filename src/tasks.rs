@@ -1,7 +1,52 @@
-use crate::models::Data;
+use crate::models::{Data, Error};
 use chrono::Utc;
 use poise::serenity_prelude as serenity;
 use std::sync::Arc;
+
+pub async fn schedule_catchup(ctx: Arc<serenity::Context>, data: Arc<Data>) {
+    loop {
+        do_catchup(&ctx, &data).await;
+        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+    }
+}
+
+pub async fn do_catchup(ctx: &serenity::Context, data: &Data) {
+    let guilds = {
+        let db = data.db.read().await;
+        db.clone()
+    };
+
+    for (guild_id, g) in guilds {
+        if g.active_leetcode {
+            if let Some(tid) = g.thread_id {
+                let _ = catchup_thread(ctx, data, tid, guild_id).await;
+            }
+        }
+        if g.active_neetcode {
+            if let Some(tid) = g.neetcode_thread_id {
+                let _ = catchup_thread(ctx, data, tid, guild_id).await;
+            }
+        }
+    }
+}
+
+async fn catchup_thread(
+    ctx: &serenity::Context,
+    data: &Data,
+    thread_id: serenity::ChannelId,
+    guild_id: serenity::GuildId,
+) -> Result<(), Error> {
+    if let Ok(mut messages) = thread_id.messages(ctx, serenity::GetMessages::new().limit(100)).await {
+        messages.sort_by_key(|m| m.timestamp);
+        for msg in messages {
+            if msg.author.bot {
+                continue;
+            }
+            let _ = crate::events::process_solution_message(ctx, &msg, data, guild_id).await;
+        }
+    }
+    Ok(())
+}
 
 pub async fn schedule_monthly_winner(ctx: Arc<serenity::Context>, data: Arc<Data>) {
     loop {
@@ -14,7 +59,6 @@ pub async fn schedule_monthly_winner(ctx: Arc<serenity::Context>, data: Arc<Data
             let mut db = data.db.write().await;
             for (_, g) in db.iter_mut() {
                 if g.last_processed_month.is_none() {
-                    // Start tracking this month instead of instantly resetting newly added servers
                     g.last_processed_month = Some(current_month);
                     changed = true;
                     continue;
@@ -58,7 +102,6 @@ pub async fn schedule_monthly_winner(ctx: Arc<serenity::Context>, data: Arc<Data
                             let _ = cid.say(&ctx.http, msg).await;
                         }
 
-                        // Reset Scores
                         for status in g.users.values_mut() {
                             status.score = 0;
                             status.monthly_record = 0;
@@ -104,6 +147,7 @@ pub async fn schedule_daily_question(ctx: Arc<serenity::Context>, data: Arc<Data
 
         for (guild_id, channel_id, old_thread_id) in targets {
             if let Some(old_tid) = old_thread_id {
+                let _ = catchup_thread(&ctx, &data, old_tid, guild_id).await;
                 let _ = old_tid.delete(&ctx).await;
             }
 
@@ -139,6 +183,8 @@ pub async fn schedule_daily_question(ctx: Arc<serenity::Context>, data: Arc<Data
                 if let Some(g) = db.get_mut(&guild_id) {
                     g.thread_id = tid;
                     g.last_daily_date = Some(today.clone());
+                    g.last_daily_slug = Some(challenge.question.title_slug.clone());
+                    g.last_daily_diff = Some(challenge.question.difficulty.clone());
                     for u in g.users.values_mut() {
                         if u.submitted.is_none() {
                             u.score = u.score.saturating_sub(1);
@@ -185,6 +231,7 @@ pub async fn schedule_neetcode_daily(ctx: Arc<serenity::Context>, data: Arc<Data
 
         for (guild_id, channel_id, old_thread_id) in targets {
             if let Some(old_tid) = old_thread_id {
+                let _ = catchup_thread(&ctx, &data, old_tid, guild_id).await;
                 let _ = old_tid.delete(&ctx).await;
             }
 
@@ -220,6 +267,8 @@ pub async fn schedule_neetcode_daily(ctx: Arc<serenity::Context>, data: Arc<Data
                 if let Some(g) = db.get_mut(&guild_id) {
                     g.neetcode_thread_id = tid;
                     g.last_neetcode_date = Some(today.clone());
+                    g.last_neetcode_slug = Some(slug.to_string());
+                    g.last_neetcode_diff = Some(question.difficulty.clone());
                     for u in g.users.values_mut() {
                         if u.nc_submitted.is_none() {
                             u.score = u.score.saturating_sub(1);
