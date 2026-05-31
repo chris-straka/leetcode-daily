@@ -29,6 +29,7 @@ async fn main() {
                 commands::neetcode(),
                 commands::contests(),
                 commands::winners(),
+                commands::claim(), 
             ],
             event_handler: |ctx, event, framework, data| {
                 Box::pin(events::event_handler(ctx, event, framework, data))

@@ -36,7 +36,10 @@ async fn catchup_thread(
     thread_id: serenity::ChannelId,
     guild_id: serenity::GuildId,
 ) -> Result<(), Error> {
-    if let Ok(mut messages) = thread_id.messages(ctx, serenity::GetMessages::new().limit(100)).await {
+    if let Ok(mut messages) = thread_id
+        .messages(ctx, serenity::GetMessages::new().limit(100))
+        .await
+    {
         messages.sort_by_key(|m| m.timestamp);
         for msg in messages {
             if msg.author.bot {
@@ -66,9 +69,27 @@ pub async fn schedule_monthly_winner(ctx: Arc<serenity::Context>, data: Arc<Data
 
                 if let Some(last_month) = g.last_processed_month {
                     if last_month != current_month {
-                        let prev_year = if last_month > current_month { now.year() - 1 } else { now.year() };
-                        let month_names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-                        let prev_month_name = format!("{} {}", month_names[(last_month - 1) as usize], prev_year);
+                        let prev_year = if last_month > current_month {
+                            now.year() - 1
+                        } else {
+                            now.year()
+                        };
+                        let month_names = [
+                            "January",
+                            "February",
+                            "March",
+                            "April",
+                            "May",
+                            "June",
+                            "July",
+                            "August",
+                            "September",
+                            "October",
+                            "November",
+                            "December",
+                        ];
+                        let prev_month_name =
+                            format!("{} {}", month_names[(last_month - 1) as usize], prev_year);
 
                         let mut best_score = 0;
                         for status in g.users.values() {
@@ -94,10 +115,20 @@ pub async fn schedule_monthly_winner(ctx: Arc<serenity::Context>, data: Arc<Data
 
                         if let Some(cid) = g.channel_id {
                             let msg = if !best_users.is_empty() {
-                                let users_str = best_users.iter().map(|id| format!("<@{}>", id)).collect::<Vec<_>>().join(", ");
-                                format!("🏆 **Leetcoder of the Month** for {} is {} with **{}** points! Scores have been reset.", prev_month_name, users_str, best_score)
+                                let users_str = best_users
+                                    .iter()
+                                    .map(|id| format!("<@{}>", id))
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                format!(
+                                    "🏆 **Leetcoder of the Month** for {} is {} with **{}** points! Scores have been reset.",
+                                    prev_month_name, users_str, best_score
+                                )
                             } else {
-                                format!("🏆 No one scored points in {}! Scores have been reset.", prev_month_name)
+                                format!(
+                                    "🏆 No one scored points in {}! Scores have been reset.",
+                                    prev_month_name
+                                )
                             };
                             let _ = cid.say(&ctx.http, msg).await;
                         }
@@ -116,7 +147,7 @@ pub async fn schedule_monthly_winner(ctx: Arc<serenity::Context>, data: Arc<Data
                 data.save_from_lock(&db).await;
             }
         }
-        
+
         tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
     }
 }
@@ -175,7 +206,10 @@ pub async fn schedule_daily_question(ctx: Arc<serenity::Context>, data: Arc<Data
                     .ok();
                 if let Some(t) = tid {
                     let _ = t
-                        .say(&ctx, "Paste solution in a code block to earn points!")
+                        .say(
+                            &ctx,
+                            "Run `/claim` to verify your solution and earn points!",
+                        )
                         .await;
                 }
 
@@ -259,7 +293,10 @@ pub async fn schedule_neetcode_daily(ctx: Arc<serenity::Context>, data: Arc<Data
                     .ok();
                 if let Some(t) = tid {
                     let _ = t
-                        .say(&ctx, "Paste solution in a code block to earn points!")
+                        .say(
+                            &ctx,
+                            "Run `/claim` to verify your solution and earn points!",
+                        )
                         .await;
                 }
 

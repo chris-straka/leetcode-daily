@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::models::{Context, Error};
 use chrono::Datelike;
 use poise::serenity_prelude as serenity;
@@ -279,5 +281,194 @@ pub async fn contests(ctx: Context<'_>) -> Result<(), Error> {
     }
 
     ctx.say(msg).await?;
+    Ok(())
+}
+
+#[poise::command(slash_command)]
+pub async fn claim(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.defer().await?;
+    let gid = ctx.guild_id().ok_or("Must be in a server.")?;
+    let user_id = ctx.author().id;
+
+    // Prevent concurrent claim checks for the same user
+    let key = (gid, user_id, "claim".to_string());
+    
+    let is_processing = {
+        let mut p = ctx.data().processing.lock().unwrap();
+        if p.contains(&key) {
+            true
+        } else {
+            p.insert(key.clone());
+            false
+        }
+    }; // Lock is dropped here
+
+    if is_processing {
+        ctx.say("⏳ Already checking your submissions...").await?;
+        return Ok(());
+    }
+
+    struct ClaimGuard {
+        key: (serenity::GuildId, serenity::UserId, String),
+        processing: Arc<std::sync::Mutex<std::collections::HashSet<(serenity::GuildId, serenity::UserId, String)>>>,
+    }
+    
+    impl Drop for ClaimGuard {
+        fn drop(&mut self) {
+            if let Ok(mut p) = self.processing.lock() {
+                p.remove(&self.key);
+            }
+        }
+    }
+
+    let _guard = ClaimGuard {
+        key: key.clone(),
+        processing: ctx.data().processing.clone(),
+    };
+
+    // 1. Gather required state from DB
+    let (
+        lc_active, nc_active, 
+        mut lc_target, mut lc_diff, 
+        mut nc_target, mut nc_diff, 
+        username, user_submitted_lc, user_submitted_nc, 
+        lc_solvers, nc_solvers, channel_id
+    ) = {
+        let db = ctx.data().db.read().await;
+        let g = db.get(&gid).ok_or("Server not configured.")?;
+        
+        let u = g.users.get(&user_id);
+        let username = u.and_then(|u| u.leetcode_username.clone());
+        let user_submitted_lc = u.is_some_and(|u| u.submitted.is_some());
+        let user_submitted_nc = u.is_some_and(|u| u.nc_submitted.is_some());
+        
+        let lc_solvers = g.users.values().filter(|u| u.submitted.is_some()).count();
+        let nc_solvers = g.users.values().filter(|u| u.nc_submitted.is_some()).count();
+        
+        (
+            g.active_leetcode, g.active_neetcode,
+            g.last_daily_slug.clone(), g.last_daily_diff.clone(),
+            g.last_neetcode_slug.clone(), g.last_neetcode_diff.clone(),
+            username, user_submitted_lc, user_submitted_nc,
+            lc_solvers, nc_solvers, g.channel_id
+        )
+    };
+
+    let Some(uname) = username else {
+        ctx.say("❌ Please run `/register <your_leetcode_username>` first!").await?;
+        return Ok(());
+    };
+
+    if !lc_active && !nc_active {
+        ctx.say("❌ No dailies are active on this server.").await?;
+        return Ok(());
+    }
+
+    if (user_submitted_lc || !lc_active) && (user_submitted_nc || !nc_active) {
+        ctx.say("✅ You have already claimed all active dailies for today!").await?;
+        return Ok(());
+    }
+
+    // 2. Fallback to fetch targets if missing due to a restart
+    if lc_active && lc_target.is_none() {
+        if let Ok(daily) = crate::leetcode::fetch_daily_question().await {
+            lc_target = Some(daily.question.title_slug);
+            lc_diff = Some(daily.question.difficulty);
+        }
+    }
+
+    if nc_active && nc_target.is_none() {
+        use chrono::Datelike;
+        let days = chrono::Utc::now().num_days_from_ce();
+        let slug = crate::neetcode::NEETCODE_250[(days as usize) % crate::neetcode::NEETCODE_250.len()].to_string();
+        nc_target = Some(slug.clone());
+        if let Ok(q) = crate::leetcode::fetch_question_by_slug(&slug).await {
+            nc_diff = Some(q.difficulty);
+        } else {
+            nc_diff = Some("Medium".to_string());
+        }
+    }
+
+    // 3. Fetch submissions and verify
+    let subs = crate::leetcode::fetch_recent_ac_submissions(&uname).await.unwrap_or_default();
+    
+    let mut claimed_lc = false;
+    let mut claimed_nc = false;
+    let mut total_gain = 0;
+    let mut announcements = Vec::new();
+
+    if lc_active && !user_submitted_lc {
+        if let Some(ref slug) = lc_target {
+            if subs.iter().any(|sub| sub.title_slug == *slug) {
+                claimed_lc = true;
+                let mut gain = match lc_diff.as_deref().unwrap_or("Medium") {
+                    "Easy" => 1, "Medium" => 2, "Hard" => 3, _ => 1,
+                };
+                if lc_solvers == 0 {
+                    gain += 1;
+                    announcements.push(format!("🥇 **<@{}>** is the first to solve today's LeetCode daily! (+1 bonus pt)", user_id));
+                }
+                total_gain += gain;
+            }
+        }
+    }
+
+    if nc_active && !user_submitted_nc {
+        if let Some(ref slug) = nc_target {
+            if subs.iter().any(|sub| sub.title_slug == *slug) {
+                claimed_nc = true;
+                let mut gain = match nc_diff.as_deref().unwrap_or("Medium") {
+                    "Easy" => 1, "Medium" => 2, "Hard" => 3, _ => 1,
+                };
+                if nc_solvers == 0 {
+                    gain += 1;
+                    announcements.push(format!("🥇 **<@{}>** is the first to solve today's NeetCode daily! (+1 bonus pt)", user_id));
+                }
+                total_gain += gain;
+            }
+        }
+    }
+
+    if !claimed_lc && !claimed_nc {
+        ctx.say("❌ Couldn't find a new Accepted submission for today's dailies. (Wait a few seconds after submitting to LeetCode).").await?;
+        return Ok(());
+    }
+
+    // 4. Save to Database
+    {
+        let mut db = ctx.data().db.write().await;
+        let guild_data = db.entry(gid).or_default();
+        let user = guild_data.users.entry(user_id).or_default();
+        
+        if claimed_lc {
+            user.submitted = Some("Claimed via /claim".to_string());
+            user.monthly_record += 1;
+            user.days_missed = 0;
+        }
+        if claimed_nc {
+            user.nc_submitted = Some("Claimed via /claim".to_string());
+            user.monthly_record += 1;
+            user.days_missed = 0;
+        }
+        user.score += total_gain;
+        ctx.data().save_from_lock(&db).await;
+    }
+
+    // 5. Send Announcements & Response
+    if let Some(cid) = channel_id {
+        for ann in announcements {
+            let _ = cid.say(&ctx.http(), ann).await;
+        }
+    }
+
+    let mut resp = format!("✅ Verified via API! +**{}** pts.", total_gain);
+    match (claimed_lc, claimed_nc) {
+        (true, true) => resp.push_str(" (LeetCode & NeetCode)"),
+        (true, false) => resp.push_str(" (LeetCode)"),
+        (false, true) => resp.push_str(" (NeetCode)"),
+        _ => {}
+    }
+    
+    ctx.say(resp).await?;
     Ok(())
 }
