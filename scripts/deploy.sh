@@ -11,3 +11,4 @@ screen -dmS "$SESSION" cargo run
 
 echo "🚀 Bot is compiling and starting in screen: $SESSION"
 echo "👉 Use 'screen -r $SESSION' to see logs/output"
+echo "👉 Use 'screen -ls to view current bots"
