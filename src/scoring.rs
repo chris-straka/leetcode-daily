@@ -186,7 +186,9 @@ impl ContestStage {
             ContestStage::QuarterHourBefore => {
                 format!("🚨 **15 Minutes**: {title} is about to begin. Join the lobby!")
             }
-            ContestStage::Started => format!("🚀 **Started**: {title} is live! Good luck everyone!"),
+            ContestStage::Started => {
+                format!("🚀 **Started**: {title} is live! Good luck everyone!")
+            }
         }
     }
 }
@@ -213,8 +215,20 @@ mod tests {
         let mut g = GuildData::default();
         let a = award(&mut g, uid(1), Daily::LeetCode, "Hard", "p".into());
         let b = award(&mut g, uid(2), Daily::LeetCode, "Hard", "p".into());
-        assert_eq!(a, Some(Award { points: 4, first: true }));
-        assert_eq!(b, Some(Award { points: 3, first: false }));
+        assert_eq!(
+            a,
+            Some(Award {
+                points: 4,
+                first: true
+            })
+        );
+        assert_eq!(
+            b,
+            Some(Award {
+                points: 3,
+                first: false
+            })
+        );
     }
 
     #[test]
@@ -222,7 +236,10 @@ mod tests {
         // The double-award race: a code block and /claim both verify.
         let mut g = GuildData::default();
         assert!(award(&mut g, uid(1), Daily::LeetCode, "Easy", "msg".into()).is_some());
-        assert_eq!(award(&mut g, uid(1), Daily::LeetCode, "Easy", "claim".into()), None);
+        assert_eq!(
+            award(&mut g, uid(1), Daily::LeetCode, "Easy", "claim".into()),
+            None
+        );
         assert_eq!(g.users[&uid(1)].score, 2);
         assert_eq!(g.users[&uid(1)].monthly_record, 1);
     }
@@ -232,15 +249,33 @@ mod tests {
         let mut g = GuildData::default();
         award(&mut g, uid(1), Daily::LeetCode, "Easy", "p".into());
         let nc = award(&mut g, uid(2), Daily::NeetCode, "Medium", "p".into());
-        assert_eq!(nc, Some(Award { points: 3, first: true }));
+        assert_eq!(
+            nc,
+            Some(Award {
+                points: 3,
+                first: true
+            })
+        );
         assert!(award(&mut g, uid(1), Daily::NeetCode, "Medium", "p".into()).is_some());
     }
 
     #[test]
     fn rollover_penalises_non_solvers_and_clears_flags() {
         let mut g = GuildData::default();
-        g.users.insert(uid(1), Status { score: 5, ..Default::default() });
-        g.users.insert(uid(2), Status { score: 0, ..Default::default() });
+        g.users.insert(
+            uid(1),
+            Status {
+                score: 5,
+                ..Default::default()
+            },
+        );
+        g.users.insert(
+            uid(2),
+            Status {
+                score: 0,
+                ..Default::default()
+            },
+        );
         award(&mut g, uid(3), Daily::LeetCode, "Easy", "p".into());
 
         daily_rollover(&mut g, Daily::LeetCode);
@@ -265,7 +300,13 @@ mod tests {
     fn monthly_winner_ties_are_all_reported() {
         let mut g = GuildData::default();
         for (id, score) in [(3, 7), (1, 7), (2, 4)] {
-            g.users.insert(uid(id), Status { score, ..Default::default() });
+            g.users.insert(
+                uid(id),
+                Status {
+                    score,
+                    ..Default::default()
+                },
+            );
         }
         assert_eq!(monthly_winners(&g), (7, vec![uid(1), uid(3)]));
     }
@@ -289,7 +330,10 @@ mod tests {
     fn neetcode_rotation_walks_the_list_one_problem_a_day() {
         let d = NaiveDate::from_ymd_opt(2026, 10, 6).unwrap();
         let list = crate::neetcode::NEETCODE_250;
-        let i = list.iter().position(|s| *s == neetcode_slug_for(d)).unwrap();
+        let i = list
+            .iter()
+            .position(|s| *s == neetcode_slug_for(d))
+            .unwrap();
         let next = neetcode_slug_for(d.succ_opt().unwrap());
         assert_eq!(next, list[(i + 1) % list.len()]);
         let cycle = d + chrono::Days::new(list.len() as u64);
@@ -316,10 +360,10 @@ mod tests {
         let mut seen = Vec::new();
         let mut t = 25 * 3600;
         while t > -1800 {
-            if let Some(s) = contest_stage(t) {
-                if !seen.contains(&s) {
-                    seen.push(s);
-                }
+            if let Some(s) = contest_stage(t)
+                && !seen.contains(&s)
+            {
+                seen.push(s);
             }
             t -= 307;
         }

@@ -48,7 +48,7 @@ pub async fn scores(ctx: Context<'_>) -> Result<(), Error> {
     let g = db.get(&gid).ok_or("Run /channel first")?;
 
     let mut lb: Vec<_> = g.users.iter().collect();
-    lb.sort_by(|a, b| b.1.score.cmp(&a.1.score));
+    lb.sort_by_key(|(id, s)| (std::cmp::Reverse(s.score), **id)); // ties in a stable order
 
     let mut msg = String::from("**Leaderboard:**\n");
     for (p, (id, s)) in lb.into_iter().enumerate() {
@@ -118,7 +118,7 @@ pub async fn register(ctx: Context<'_>, username: String) -> Result<(), Error> {
     let rating = crate::leetcode::fetch_user_rating(&username)
         .await
         .unwrap_or(0.0);
-    
+
     let mut db = ctx.data().db.write().await;
     let u = db
         .entry(gid)
@@ -129,7 +129,7 @@ pub async fn register(ctx: Context<'_>, username: String) -> Result<(), Error> {
     u.leetcode_username = Some(username.clone());
     u.contest_rating = rating;
     ctx.data().save_from_lock(&db).await;
-    
+
     ctx.say(format!(
         "✅ Linked **{}** (Rating: {:.0})",
         username, rating
@@ -231,10 +231,10 @@ pub async fn daily(ctx: Context<'_>) -> Result<(), Error> {
 
     if let Some(gid) = ctx.guild_id() {
         let db = ctx.data().db.read().await;
-        if let Some(g) = db.get(&gid) {
-            if let Some(tid) = g.thread_id {
-                content.push_str(&format!("\n📝 **Discuss here:** <#{}>", tid));
-            }
+        if let Some(g) = db.get(&gid)
+            && let Some(tid) = g.thread_id
+        {
+            content.push_str(&format!("\n📝 **Discuss here:** <#{}>", tid));
         }
     }
 
@@ -257,10 +257,10 @@ pub async fn neetcode(ctx: Context<'_>) -> Result<(), Error> {
 
     if let Some(gid) = ctx.guild_id() {
         let db = ctx.data().db.read().await;
-        if let Some(g) = db.get(&gid) {
-            if let Some(tid) = g.neetcode_thread_id {
-                content.push_str(&format!("\n📝 **Discuss here:** <#{}>", tid));
-            }
+        if let Some(g) = db.get(&gid)
+            && let Some(tid) = g.neetcode_thread_id
+        {
+            content.push_str(&format!("\n📝 **Discuss here:** <#{}>", tid));
         }
     }
 
@@ -291,7 +291,7 @@ pub async fn claim(ctx: Context<'_>) -> Result<(), Error> {
 
     // Prevent concurrent claim checks for the same user
     let key = (gid, user_id, "claim".to_string());
-    
+
     let is_processing = {
         let mut p = ctx.data().processing.lock().unwrap();
         if p.contains(&key) {
@@ -309,9 +309,13 @@ pub async fn claim(ctx: Context<'_>) -> Result<(), Error> {
 
     struct ClaimGuard {
         key: (serenity::GuildId, serenity::UserId, String),
-        processing: Arc<std::sync::Mutex<std::collections::HashSet<(serenity::GuildId, serenity::UserId, String)>>>,
+        processing: Arc<
+            std::sync::Mutex<
+                std::collections::HashSet<(serenity::GuildId, serenity::UserId, String)>,
+            >,
+        >,
     }
-    
+
     impl Drop for ClaimGuard {
         fn drop(&mut self) {
             if let Ok(mut p) = self.processing.lock() {
@@ -327,31 +331,42 @@ pub async fn claim(ctx: Context<'_>) -> Result<(), Error> {
 
     // 1. Gather required state from DB
     let (
-        lc_active, nc_active, 
-        mut lc_target, mut lc_diff, 
-        mut nc_target, mut nc_diff, 
-        username, user_submitted_lc, user_submitted_nc,
-        channel_id
+        lc_active,
+        nc_active,
+        mut lc_target,
+        mut lc_diff,
+        mut nc_target,
+        mut nc_diff,
+        username,
+        user_submitted_lc,
+        user_submitted_nc,
+        channel_id,
     ) = {
         let db = ctx.data().db.read().await;
         let g = db.get(&gid).ok_or("Server not configured.")?;
-        
+
         let u = g.users.get(&user_id);
         let username = u.and_then(|u| u.leetcode_username.clone());
         let user_submitted_lc = u.is_some_and(|u| u.submitted.is_some());
         let user_submitted_nc = u.is_some_and(|u| u.nc_submitted.is_some());
-        
+
         (
-            g.active_leetcode, g.active_neetcode,
-            g.last_daily_slug.clone(), g.last_daily_diff.clone(),
-            g.last_neetcode_slug.clone(), g.last_neetcode_diff.clone(),
-            username, user_submitted_lc, user_submitted_nc,
-            g.channel_id
+            g.active_leetcode,
+            g.active_neetcode,
+            g.last_daily_slug.clone(),
+            g.last_daily_diff.clone(),
+            g.last_neetcode_slug.clone(),
+            g.last_neetcode_diff.clone(),
+            username,
+            user_submitted_lc,
+            user_submitted_nc,
+            g.channel_id,
         )
     };
 
     let Some(uname) = username else {
-        ctx.say("❌ Please run `/register <your_leetcode_username>` first!").await?;
+        ctx.say("❌ Please run `/register <your_leetcode_username>` first!")
+            .await?;
         return Ok(());
     };
 
@@ -361,16 +376,18 @@ pub async fn claim(ctx: Context<'_>) -> Result<(), Error> {
     }
 
     if (user_submitted_lc || !lc_active) && (user_submitted_nc || !nc_active) {
-        ctx.say("✅ You have already claimed all active dailies for today!").await?;
+        ctx.say("✅ You have already claimed all active dailies for today!")
+            .await?;
         return Ok(());
     }
 
     // 2. Fallback to fetch targets if missing due to a restart
-    if lc_active && lc_target.is_none() {
-        if let Ok(daily) = crate::leetcode::fetch_daily_question().await {
-            lc_target = Some(daily.question.title_slug);
-            lc_diff = Some(daily.question.difficulty);
-        }
+    if lc_active
+        && lc_target.is_none()
+        && let Ok(daily) = crate::leetcode::fetch_daily_question().await
+    {
+        lc_target = Some(daily.question.title_slug);
+        lc_diff = Some(daily.question.difficulty);
     }
 
     if nc_active && nc_target.is_none() {
@@ -384,10 +401,14 @@ pub async fn claim(ctx: Context<'_>) -> Result<(), Error> {
     }
 
     // 3. Fetch submissions and verify
-    let subs = crate::leetcode::fetch_recent_ac_submissions(&uname).await.unwrap_or_default();
-    
+    let subs = crate::leetcode::fetch_recent_ac_submissions(&uname)
+        .await
+        .unwrap_or_default();
+
     let solved = |target: &Option<String>| {
-        target.as_ref().is_some_and(|slug| subs.iter().any(|sub| sub.title_slug == *slug))
+        target
+            .as_ref()
+            .is_some_and(|slug| subs.iter().any(|sub| sub.title_slug == *slug))
     };
     let try_lc = lc_active && !user_submitted_lc && solved(&lc_target);
     let try_nc = nc_active && !user_submitted_nc && solved(&nc_target);
@@ -398,10 +419,26 @@ pub async fn claim(ctx: Context<'_>) -> Result<(), Error> {
         let mut db = ctx.data().db.write().await;
         let guild_data = db.entry(gid).or_default();
         let lc = try_lc
-            .then(|| award(guild_data, user_id, Daily::LeetCode, lc_diff.as_deref().unwrap_or("Medium"), "Claimed via /claim".into()))
+            .then(|| {
+                award(
+                    guild_data,
+                    user_id,
+                    Daily::LeetCode,
+                    lc_diff.as_deref().unwrap_or("Medium"),
+                    "Claimed via /claim".into(),
+                )
+            })
             .flatten();
         let nc = try_nc
-            .then(|| award(guild_data, user_id, Daily::NeetCode, nc_diff.as_deref().unwrap_or("Medium"), "Claimed via /claim".into()))
+            .then(|| {
+                award(
+                    guild_data,
+                    user_id,
+                    Daily::NeetCode,
+                    nc_diff.as_deref().unwrap_or("Medium"),
+                    "Claimed via /claim".into(),
+                )
+            })
             .flatten();
         if lc.is_some() || nc.is_some() {
             ctx.data().save_from_lock(&db).await;
@@ -437,7 +474,7 @@ pub async fn claim(ctx: Context<'_>) -> Result<(), Error> {
         (false, true) => resp.push_str(" (NeetCode)"),
         _ => {}
     }
-    
+
     ctx.say(resp).await?;
     Ok(())
 }

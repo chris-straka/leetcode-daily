@@ -17,15 +17,15 @@ pub async fn do_catchup(ctx: &serenity::Context, data: &Data) {
     };
 
     for (guild_id, g) in guilds {
-        if g.active_leetcode {
-            if let Some(tid) = g.thread_id {
-                let _ = catchup_thread(ctx, data, tid, guild_id).await;
-            }
+        if g.active_leetcode
+            && let Some(tid) = g.thread_id
+        {
+            let _ = catchup_thread(ctx, data, tid, guild_id).await;
         }
-        if g.active_neetcode {
-            if let Some(tid) = g.neetcode_thread_id {
-                let _ = catchup_thread(ctx, data, tid, guild_id).await;
-            }
+        if g.active_neetcode
+            && let Some(tid) = g.neetcode_thread_id
+        {
+            let _ = catchup_thread(ctx, data, tid, guild_id).await;
         }
     }
 }
@@ -60,53 +60,53 @@ pub async fn schedule_monthly_winner(ctx: Arc<serenity::Context>, data: Arc<Data
         let mut changed = false;
         {
             let mut db = data.db.write().await;
-            for (_, g) in db.iter_mut() {
+            for g in db.values_mut() {
                 if g.last_processed_month.is_none() {
                     g.last_processed_month = Some(current_month);
                     changed = true;
                     continue;
                 }
 
-                if let Some(last_month) = g.last_processed_month {
-                    if last_month != current_month {
-                        let prev_month_name =
-                            crate::scoring::finished_month_label(last_month, now.date_naive());
-                        let (best_score, best_users) = crate::scoring::monthly_winners(g);
+                if let Some(last_month) = g.last_processed_month
+                    && last_month != current_month
+                {
+                    let prev_month_name =
+                        crate::scoring::finished_month_label(last_month, now.date_naive());
+                    let (best_score, best_users) = crate::scoring::monthly_winners(g);
 
-                        g.monthly_winners.push(crate::models::MonthlyWinner {
-                            month_year: prev_month_name.clone(),
-                            user_ids: best_users.clone(),
-                            score: best_score,
-                        });
+                    g.monthly_winners.push(crate::models::MonthlyWinner {
+                        month_year: prev_month_name.clone(),
+                        user_ids: best_users.clone(),
+                        score: best_score,
+                    });
 
-                        if let Some(cid) = g.channel_id {
-                            let msg = if !best_users.is_empty() {
-                                let users_str = best_users
-                                    .iter()
-                                    .map(|id| format!("<@{}>", id))
-                                    .collect::<Vec<_>>()
-                                    .join(", ");
-                                format!(
-                                    "🏆 **Leetcoder of the Month** for {} is {} with **{}** points! Scores have been reset.",
-                                    prev_month_name, users_str, best_score
-                                )
-                            } else {
-                                format!(
-                                    "🏆 No one scored points in {}! Scores have been reset.",
-                                    prev_month_name
-                                )
-                            };
-                            let _ = cid.say(&ctx.http, msg).await;
-                        }
-
-                        for status in g.users.values_mut() {
-                            status.score = 0;
-                            status.monthly_record = 0;
-                        }
-
-                        g.last_processed_month = Some(current_month);
-                        changed = true;
+                    if let Some(cid) = g.channel_id {
+                        let msg = if !best_users.is_empty() {
+                            let users_str = best_users
+                                .iter()
+                                .map(|id| format!("<@{}>", id))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!(
+                                "🏆 **Leetcoder of the Month** for {} is {} with **{}** points! Scores have been reset.",
+                                prev_month_name, users_str, best_score
+                            )
+                        } else {
+                            format!(
+                                "🏆 No one scored points in {}! Scores have been reset.",
+                                prev_month_name
+                            )
+                        };
+                        let _ = cid.say(&ctx.http, msg).await;
                     }
+
+                    for status in g.users.values_mut() {
+                        status.score = 0;
+                        status.monthly_record = 0;
+                    }
+
+                    g.last_processed_month = Some(current_month);
+                    changed = true;
                 }
             }
             if changed {

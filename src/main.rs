@@ -30,7 +30,7 @@ async fn main() {
                 commands::neetcode(),
                 commands::contests(),
                 commands::winners(),
-                commands::claim(), 
+                commands::claim(),
             ],
             event_handler: |ctx, event, framework, data| {
                 Box::pin(events::event_handler(ctx, event, framework, data))
@@ -77,7 +77,7 @@ async fn main() {
                 tokio::spawn(async move {
                     tasks::schedule_monthly_winner(t4_ctx, t4_data).await;
                 });
-                
+
                 // Spawn catch-up tasks
                 let t5_data = Arc::new(data.clone());
                 let t5_ctx = Arc::new(ctx.clone());

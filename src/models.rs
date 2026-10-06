@@ -24,7 +24,7 @@ pub struct GuildData {
     #[serde(alias = "active_daily")]
     pub active_leetcode: bool,
     pub active_neetcode: bool,
-    pub last_daily_date: Option<String>, 
+    pub last_daily_date: Option<String>,
     pub last_neetcode_date: Option<String>,
     pub last_daily_slug: Option<String>,
     pub last_daily_diff: Option<String>,
@@ -58,8 +58,13 @@ pub const DB_PATH: &str = "database.json";
 /// every guild's scores on the next save.
 pub async fn load_db(path: &Path) -> Result<Db, Error> {
     match tokio::fs::read_to_string(path).await {
-        Ok(json) => serde_json::from_str(&json)
-            .map_err(|e| format!("{} is corrupt ({e}); refusing to start over it", path.display()).into()),
+        Ok(json) => serde_json::from_str(&json).map_err(|e| {
+            format!(
+                "{} is corrupt ({e}); refusing to start over it",
+                path.display()
+            )
+            .into()
+        }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Db::new()),
         Err(e) => Err(e.into()),
     }
@@ -103,7 +108,8 @@ mod tests {
     use super::*;
 
     fn temp_path(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("leetcode-daily-{}-{name}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("leetcode-daily-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("database.json")
     }
@@ -117,8 +123,14 @@ mod tests {
         save_db(&path, &db).await.unwrap();
 
         let loaded = load_db(&path).await.unwrap();
-        assert_eq!(loaded[&serenity::GuildId::new(7)].users[&serenity::UserId::new(1)].score, 9);
-        assert!(!path.with_extension("json.tmp").exists(), "temp file renamed away");
+        assert_eq!(
+            loaded[&serenity::GuildId::new(7)].users[&serenity::UserId::new(1)].score,
+            9
+        );
+        assert!(
+            !path.with_extension("json.tmp").exists(),
+            "temp file renamed away"
+        );
     }
 
     #[tokio::test]

@@ -22,7 +22,9 @@ struct ProcessingGuard {
     guild_id: serenity::GuildId,
     user_id: serenity::UserId,
     thread_type: String,
-    processing: Arc<std::sync::Mutex<std::collections::HashSet<(serenity::GuildId, serenity::UserId, String)>>>,
+    processing: Arc<
+        std::sync::Mutex<std::collections::HashSet<(serenity::GuildId, serenity::UserId, String)>>,
+    >,
 }
 
 impl Drop for ProcessingGuard {
@@ -90,10 +92,12 @@ pub async fn process_solution_message(
     };
 
     let Some(username) = username_opt else {
-        let _ = msg.reply(
-            ctx,
-            "❌ Please run `/register <your_leetcode_username>` first!",
-        ).await;
+        let _ = msg
+            .reply(
+                ctx,
+                "❌ Please run `/register <your_leetcode_username>` first!",
+            )
+            .await;
         return Ok(());
     };
 
@@ -106,7 +110,7 @@ pub async fn process_solution_message(
                 (None, None)
             }
         };
-        
+
         if let (Some(s), Some(d)) = (db_slug, db_diff) {
             (s, d)
         } else {
@@ -128,11 +132,12 @@ pub async fn process_solution_message(
                 (None, None)
             }
         };
-        
+
         if let (Some(s), Some(d)) = (db_slug, db_diff) {
             (s, d)
         } else {
-            let slug = crate::scoring::neetcode_slug_for(chrono::Utc::now().date_naive()).to_string();
+            let slug =
+                crate::scoring::neetcode_slug_for(chrono::Utc::now().date_naive()).to_string();
 
             let diff = match crate::leetcode::fetch_question_by_slug(&slug).await {
                 Ok(q) => q.difficulty,
@@ -145,7 +150,9 @@ pub async fn process_solution_message(
     let subs = match crate::leetcode::fetch_recent_ac_submissions(&username).await {
         Ok(s) => s,
         Err(_) => {
-            let _ = msg.reply(ctx, "Error fetching your profile. Is it public?").await;
+            let _ = msg
+                .reply(ctx, "Error fetching your profile. Is it public?")
+                .await;
             return Ok(());
         }
     };
@@ -157,7 +164,11 @@ pub async fn process_solution_message(
         return Ok(());
     }
 
-    let daily = if is_lc_thread { Daily::LeetCode } else { Daily::NeetCode };
+    let daily = if is_lc_thread {
+        Daily::LeetCode
+    } else {
+        Daily::NeetCode
+    };
     let mut db = data.db.write().await;
     let guild_data = db.entry(guild_id).or_default();
     let Some(won) = award(guild_data, msg.author.id, daily, &difficulty, msg.link()) else {
@@ -167,15 +178,15 @@ pub async fn process_solution_message(
     data.save_from_lock(&db).await;
     drop(db);
 
-    if won.first {
-        if let Some(main_channel) = main_channel {
-            let announcement = format!(
-                "🥇 **<@{}>** is the first to solve today's {} daily! (+1 bonus pt)",
-                msg.author.id,
-                daily.name()
-            );
-            let _ = main_channel.say(&ctx.http, announcement).await;
-        }
+    if won.first
+        && let Some(main_channel) = main_channel
+    {
+        let announcement = format!(
+            "🥇 **<@{}>** is the first to solve today's {} daily! (+1 bonus pt)",
+            msg.author.id,
+            daily.name()
+        );
+        let _ = main_channel.say(&ctx.http, announcement).await;
     }
 
     let response = format!("✅ Verified via API! +**{}** pts.", won.points);
@@ -190,21 +201,18 @@ pub async fn event_handler(
     _framework: poise::FrameworkContext<'_, Data, Error>,
     data: &Data,
 ) -> Result<(), Error> {
-    match event {
-        serenity::FullEvent::Message { new_message: msg } => {
-            if msg.author.bot || msg.guild_id.is_none() {
-                return Ok(());
-            }
-
-            let guild_id = msg.guild_id.unwrap();
-
-            if let Some(fixed_url) = embeddable_instagram_link(&msg.content) {
-                let _ = msg.reply(ctx, fixed_url).await;
-            }
-
-            let _ = process_solution_message(ctx, msg, data, guild_id).await;
+    if let serenity::FullEvent::Message { new_message: msg } = event {
+        if msg.author.bot || msg.guild_id.is_none() {
+            return Ok(());
         }
-        _ => {}
+
+        let guild_id = msg.guild_id.unwrap();
+
+        if let Some(fixed_url) = embeddable_instagram_link(&msg.content) {
+            let _ = msg.reply(ctx, fixed_url).await;
+        }
+
+        let _ = process_solution_message(ctx, msg, data, guild_id).await;
     }
     Ok(())
 }
@@ -222,13 +230,17 @@ mod tests {
     #[test]
     fn instagram_links_are_rewritten_once() {
         assert_eq!(
-            embeddable_instagram_link("look https://www.instagram.com/reel/AbC_1-x/?igsh=1 lol").as_deref(),
+            embeddable_instagram_link("look https://www.instagram.com/reel/AbC_1-x/?igsh=1 lol")
+                .as_deref(),
             Some("https://www.vxinstagram.com/reel/AbC_1-x")
         );
         assert_eq!(
             embeddable_instagram_link("https://instagram.com/p/xyz").as_deref(),
             Some("https://vxinstagram.com/p/xyz")
         );
-        assert_eq!(embeddable_instagram_link("https://instagram.com/someuser"), None);
+        assert_eq!(
+            embeddable_instagram_link("https://instagram.com/someuser"),
+            None
+        );
     }
 }
