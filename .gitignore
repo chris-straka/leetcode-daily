@@ -2,3 +2,4 @@
 database.json
 .env
 foo.md
+.DS_Store
