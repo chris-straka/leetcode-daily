@@ -159,6 +159,9 @@ pub fn create_embed(question: &Question, link: &str) -> serenity::CreateEmbed {
 #[serde(rename_all = "camelCase")]
 pub struct Submission {
     pub title_slug: String,
+    /// Unix seconds, sent by LeetCode as a string.
+    #[serde(default)]
+    pub timestamp: String,
 }
 
 #[derive(Deserialize)]
@@ -268,6 +271,10 @@ mod tests {
             .map(|s| s.title_slug.as_str())
             .collect();
         assert_eq!(slugs, ["two-sum", "3sum"]);
+        assert_eq!(
+            res.data.recent_ac_submission_list[0].timestamp,
+            "1759700000"
+        );
     }
 
     #[test]

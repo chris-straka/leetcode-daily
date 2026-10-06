@@ -337,6 +337,8 @@ pub async fn claim(ctx: Context<'_>) -> Result<(), Error> {
         mut lc_diff,
         mut nc_target,
         mut nc_diff,
+        lc_posted,
+        nc_posted,
         username,
         user_submitted_lc,
         user_submitted_nc,
@@ -357,6 +359,8 @@ pub async fn claim(ctx: Context<'_>) -> Result<(), Error> {
             g.last_daily_diff.clone(),
             g.last_neetcode_slug.clone(),
             g.last_neetcode_diff.clone(),
+            g.last_daily_date.clone(),
+            g.last_neetcode_date.clone(),
             username,
             user_submitted_lc,
             user_submitted_nc,
@@ -405,13 +409,15 @@ pub async fn claim(ctx: Context<'_>) -> Result<(), Error> {
         .await
         .unwrap_or_default();
 
-    let solved = |target: &Option<String>| {
+    let today = chrono::Utc::now().date_naive();
+    let solved = |target: &Option<String>, posted: &Option<String>| {
+        let since = crate::scoring::window_start(posted.as_deref(), today);
         target
             .as_ref()
-            .is_some_and(|slug| subs.iter().any(|sub| sub.title_slug == *slug))
+            .is_some_and(|slug| crate::scoring::solved_since(&subs, slug, since))
     };
-    let try_lc = lc_active && !user_submitted_lc && solved(&lc_target);
-    let try_nc = nc_active && !user_submitted_nc && solved(&nc_target);
+    let try_lc = lc_active && !user_submitted_lc && solved(&lc_target, &lc_posted);
+    let try_nc = nc_active && !user_submitted_nc && solved(&nc_target, &nc_posted);
 
     // 4. Award under the write lock. award() re-checks, so a code block that
     // was verified while we were calling LeetCode can't be credited twice.

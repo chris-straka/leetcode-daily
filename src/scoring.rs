@@ -2,6 +2,7 @@
 //! rotation and contest alert timing. Nothing here touches Discord or the
 //! network, so all of it is unit-tested below.
 
+use crate::leetcode::Submission;
 use crate::models::GuildData;
 use chrono::{Datelike, NaiveDate};
 use poise::serenity_prelude as serenity;
@@ -70,6 +71,26 @@ pub fn award(
     user.score += points;
     user.days_missed = 0;
     Some(Award { points, first })
+}
+
+/// Unix time of 00:00 UTC on the day a daily was posted (`posted` is the
+/// stored "%Y-%m-%d"), or on `today` if the post date isn't known.
+pub fn window_start(posted: Option<&str>, today: NaiveDate) -> i64 {
+    posted
+        .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        .unwrap_or(today)
+        .and_time(chrono::NaiveTime::MIN)
+        .and_utc()
+        .timestamp()
+}
+
+/// Whether `subs` holds an accepted solve of `slug` made at or after `since`.
+/// LeetCode repeats old problems as dailies, so an accept from before the
+/// daily was posted doesn't count. A timestamp that doesn't parse is
+/// accepted rather than locking everyone out if LeetCode changes its format.
+pub fn solved_since(subs: &[Submission], slug: &str, since: i64) -> bool {
+    subs.iter()
+        .any(|s| s.title_slug == slug && s.timestamp.parse::<i64>().map_or(true, |t| t >= since))
 }
 
 /// Starts a new day: everyone who didn't solve the outgoing daily loses a
@@ -257,6 +278,41 @@ mod tests {
             })
         );
         assert!(award(&mut g, uid(1), Daily::NeetCode, "Medium", "p".into()).is_some());
+    }
+
+    fn sub(slug: &str, timestamp: &str) -> Submission {
+        Submission {
+            title_slug: slug.into(),
+            timestamp: timestamp.into(),
+        }
+    }
+
+    #[test]
+    fn window_starts_at_utc_midnight_of_the_post_day() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 6).unwrap();
+        // 2026-10-05T00:00:00Z and 2026-10-06T00:00:00Z
+        assert_eq!(window_start(Some("2026-10-05"), today), 1_791_158_400);
+        assert_eq!(window_start(None, today), 1_791_244_800);
+        assert_eq!(window_start(Some("garbage"), today), 1_791_244_800);
+    }
+
+    #[test]
+    fn an_old_accept_of_a_repeated_daily_does_not_count() {
+        let since = 1_791_244_800;
+        let old = [sub("two-sum", "1700000000"), sub("3sum", "1791250000")];
+        assert!(!solved_since(&old, "two-sum", since));
+        assert!(solved_since(&old, "3sum", since));
+        assert!(solved_since(
+            &[sub("two-sum", "1791244800")],
+            "two-sum",
+            since
+        ));
+        assert!(!solved_since(&old, "4sum", since));
+    }
+
+    #[test]
+    fn an_unparseable_timestamp_is_not_held_against_the_player() {
+        assert!(solved_since(&[sub("two-sum", "")], "two-sum", i64::MAX));
     }
 
     #[test]

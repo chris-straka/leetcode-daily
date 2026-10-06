@@ -101,18 +101,22 @@ pub async fn process_solution_message(
         return Ok(());
     };
 
-    let (target_slug, difficulty) = if is_lc_thread {
-        let (db_slug, db_diff) = {
+    let (target_slug, difficulty, posted) = if is_lc_thread {
+        let (db_slug, db_diff, db_date) = {
             let db = data.db.read().await;
             if let Some(g) = db.get(&guild_id) {
-                (g.last_daily_slug.clone(), g.last_daily_diff.clone())
+                (
+                    g.last_daily_slug.clone(),
+                    g.last_daily_diff.clone(),
+                    g.last_daily_date.clone(),
+                )
             } else {
-                (None, None)
+                (None, None, None)
             }
         };
 
         if let (Some(s), Some(d)) = (db_slug, db_diff) {
-            (s, d)
+            (s, d, db_date)
         } else {
             let daily = match crate::leetcode::fetch_daily_question().await {
                 Ok(d) => d,
@@ -121,20 +125,24 @@ pub async fn process_solution_message(
                     return Ok(());
                 }
             };
-            (daily.question.title_slug, daily.question.difficulty)
+            (daily.question.title_slug, daily.question.difficulty, None)
         }
     } else {
-        let (db_slug, db_diff) = {
+        let (db_slug, db_diff, db_date) = {
             let db = data.db.read().await;
             if let Some(g) = db.get(&guild_id) {
-                (g.last_neetcode_slug.clone(), g.last_neetcode_diff.clone())
+                (
+                    g.last_neetcode_slug.clone(),
+                    g.last_neetcode_diff.clone(),
+                    g.last_neetcode_date.clone(),
+                )
             } else {
-                (None, None)
+                (None, None, None)
             }
         };
 
         if let (Some(s), Some(d)) = (db_slug, db_diff) {
-            (s, d)
+            (s, d, db_date)
         } else {
             let slug =
                 crate::scoring::neetcode_slug_for(chrono::Utc::now().date_naive()).to_string();
@@ -143,7 +151,7 @@ pub async fn process_solution_message(
                 Ok(q) => q.difficulty,
                 Err(_) => "Medium".to_string(),
             };
-            (slug, diff)
+            (slug, diff, None)
         }
     };
 
@@ -157,7 +165,8 @@ pub async fn process_solution_message(
         }
     };
 
-    let is_accepted = subs.iter().any(|sub| sub.title_slug == target_slug);
+    let since = crate::scoring::window_start(posted.as_deref(), chrono::Utc::now().date_naive());
+    let is_accepted = crate::scoring::solved_since(&subs, &target_slug, since);
 
     if !is_accepted {
         let _ = msg.reply(ctx, "❌ Couldn't find an Accepted submission! (Wait a few seconds after submitting to LeetCode).").await;
