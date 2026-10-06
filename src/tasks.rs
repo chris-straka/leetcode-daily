@@ -69,43 +69,9 @@ pub async fn schedule_monthly_winner(ctx: Arc<serenity::Context>, data: Arc<Data
 
                 if let Some(last_month) = g.last_processed_month {
                     if last_month != current_month {
-                        let prev_year = if last_month > current_month {
-                            now.year() - 1
-                        } else {
-                            now.year()
-                        };
-                        let month_names = [
-                            "January",
-                            "February",
-                            "March",
-                            "April",
-                            "May",
-                            "June",
-                            "July",
-                            "August",
-                            "September",
-                            "October",
-                            "November",
-                            "December",
-                        ];
                         let prev_month_name =
-                            format!("{} {}", month_names[(last_month - 1) as usize], prev_year);
-
-                        let mut best_score = 0;
-                        for status in g.users.values() {
-                            if status.score > best_score {
-                                best_score = status.score;
-                            }
-                        }
-
-                        let mut best_users = Vec::new();
-                        if best_score > 0 {
-                            for (uid, status) in &g.users {
-                                if status.score == best_score {
-                                    best_users.push(*uid);
-                                }
-                            }
-                        }
+                            crate::scoring::finished_month_label(last_month, now.date_naive());
+                        let (best_score, best_users) = crate::scoring::monthly_winners(g);
 
                         g.monthly_winners.push(crate::models::MonthlyWinner {
                             month_year: prev_month_name.clone(),
@@ -219,12 +185,7 @@ pub async fn schedule_daily_question(ctx: Arc<serenity::Context>, data: Arc<Data
                     g.last_daily_date = Some(today.clone());
                     g.last_daily_slug = Some(challenge.question.title_slug.clone());
                     g.last_daily_diff = Some(challenge.question.difficulty.clone());
-                    for u in g.users.values_mut() {
-                        if u.submitted.is_none() {
-                            u.score = u.score.saturating_sub(1);
-                        }
-                        u.submitted = None;
-                    }
+                    crate::scoring::daily_rollover(g, crate::scoring::Daily::LeetCode);
                 }
                 data.save_from_lock(&db).await;
             }
@@ -253,10 +214,7 @@ pub async fn schedule_neetcode_daily(ctx: Arc<serenity::Context>, data: Arc<Data
             continue;
         }
 
-        use chrono::Datelike;
-        let days = Utc::now().num_days_from_ce();
-        let slug =
-            crate::neetcode::NEETCODE_250[(days as usize) % crate::neetcode::NEETCODE_250.len()];
+        let slug = crate::scoring::neetcode_slug_for(Utc::now().date_naive());
 
         let Ok(question) = crate::leetcode::fetch_question_by_slug(slug).await else {
             continue;
@@ -306,12 +264,7 @@ pub async fn schedule_neetcode_daily(ctx: Arc<serenity::Context>, data: Arc<Data
                     g.last_neetcode_date = Some(today.clone());
                     g.last_neetcode_slug = Some(slug.to_string());
                     g.last_neetcode_diff = Some(question.difficulty.clone());
-                    for u in g.users.values_mut() {
-                        if u.nc_submitted.is_none() {
-                            u.score = u.score.saturating_sub(1);
-                        }
-                        u.nc_submitted = None;
-                    }
+                    crate::scoring::daily_rollover(g, crate::scoring::Daily::NeetCode);
                 }
                 data.save_from_lock(&db).await;
             }
@@ -328,69 +281,30 @@ pub async fn schedule_contests(ctx: Arc<serenity::Context>, data: Arc<Data>) {
         let now = Utc::now().timestamp();
 
         for contest in contests {
-            let diff = contest.start_time - now;
-
-            let is_24h = diff > 86100 && diff <= 86400;
-            let is_1h = diff > 3300 && diff <= 3600;
-            let is_15m = diff > 600 && diff <= 900;
-            let is_start = diff <= 0 && diff > -300;
+            let Some(stage) = crate::scoring::contest_stage(contest.start_time - now) else {
+                continue;
+            };
+            let key = stage.key(&contest.title);
 
             let guilds = {
                 let db = data.db.read().await;
                 db.iter()
                     .filter(|(_, g)| g.active_weekly && g.weekly_id.is_some())
-                    .map(|(id, g)| (*id, g.weekly_id.unwrap(), g.alerted_contests.clone()))
+                    .filter(|(_, g)| !g.alerted_contests.contains(&key))
+                    .map(|(id, g)| (*id, g.weekly_id.unwrap()))
                     .collect::<Vec<_>>()
             };
 
-            for (gid, cid, alerted) in guilds {
-                let (k24, k1, k15, ks) = (
-                    format!("{}-24h", contest.title),
-                    format!("{}-1h", contest.title),
-                    format!("{}-15m", contest.title),
-                    format!("{}-start", contest.title),
-                );
-
-                let mut key = None;
-                let mut content = None;
-
-                if is_24h && !alerted.contains(&k24) {
-                    content = Some(format!(
-                        "📅 **Contest Tomorrow**: {} starts in 24 hours! Get some sleep.",
-                        contest.title
-                    ));
-                    key = Some(k24);
-                } else if is_1h && !alerted.contains(&k1) {
-                    content = Some(format!(
-                        "⏰ **1 Hour Warning**: {} is starting soon!",
-                        contest.title
-                    ));
-                    key = Some(k1);
-                } else if is_15m && !alerted.contains(&k15) {
-                    content = Some(format!(
-                        "🚨 **15 Minutes**: {} is about to begin. Join the lobby!",
-                        contest.title
-                    ));
-                    key = Some(k15);
-                } else if is_start && !alerted.contains(&ks) {
-                    content = Some(format!(
-                        "🚀 **Started**: {} is live! Good luck everyone!",
-                        contest.title
-                    ));
-                    key = Some(ks);
-                }
-
-                if let (Some(msg), Some(k)) = (content, key) {
-                    let _ = cid.say(&ctx, msg).await;
-                    let mut db = data.db.write().await;
-                    if let Some(g) = db.get_mut(&gid) {
-                        g.alerted_contests.push(k);
-                        if g.alerted_contests.len() > 30 {
-                            g.alerted_contests.remove(0);
-                        }
+            for (gid, cid) in guilds {
+                let _ = cid.say(&ctx, stage.message(&contest.title)).await;
+                let mut db = data.db.write().await;
+                if let Some(g) = db.get_mut(&gid) {
+                    g.alerted_contests.push(key.clone());
+                    if g.alerted_contests.len() > 30 {
+                        g.alerted_contests.remove(0);
                     }
-                    data.save_from_lock(&db).await;
                 }
+                data.save_from_lock(&db).await;
             }
         }
     }

@@ -3,6 +3,7 @@ mod events;
 mod leetcode;
 mod models;
 mod neetcode;
+mod scoring;
 mod tasks;
 
 use poise::serenity_prelude as serenity;
@@ -47,13 +48,9 @@ async fn main() {
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                let db_content = tokio::fs::read_to_string("database.json")
-                    .await
-                    .unwrap_or_default();
+                let db = models::load_db(std::path::Path::new(models::DB_PATH)).await?;
                 let data = models::Data {
-                    db: Arc::new(tokio::sync::RwLock::new(
-                        serde_json::from_str(&db_content).unwrap_or_default(),
-                    )),
+                    db: Arc::new(tokio::sync::RwLock::new(db)),
                     processing: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
                 };
 

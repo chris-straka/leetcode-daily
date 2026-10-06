@@ -1,4 +1,5 @@
 use crate::models::{Data, Error};
+use crate::scoring::{Daily, award};
 use poise::serenity_prelude as serenity;
 use regex::Regex;
 use std::sync::{Arc, LazyLock};
@@ -9,6 +10,13 @@ pub static CODE_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)``
 static IG_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"https?://(?:www\.)?instagram\.com/(?:reels?|p|tv)/[A-Za-z0-9_-]+").unwrap()
 });
+
+/// Rewrites the first Instagram post/reel link to vxinstagram, which Discord
+/// can embed.
+fn embeddable_instagram_link(content: &str) -> Option<String> {
+    let url = IG_RE.find(content)?.as_str();
+    Some(url.replacen("instagram.com", "vxinstagram.com", 1))
+}
 
 struct ProcessingGuard {
     guild_id: serenity::GuildId,
@@ -124,10 +132,7 @@ pub async fn process_solution_message(
         if let (Some(s), Some(d)) = (db_slug, db_diff) {
             (s, d)
         } else {
-            use chrono::Datelike;
-            let days = chrono::Utc::now().num_days_from_ce();
-            let index = (days as usize) % crate::neetcode::NEETCODE_250.len();
-            let slug = crate::neetcode::NEETCODE_250[index].to_string();
+            let slug = crate::scoring::neetcode_slug_for(chrono::Utc::now().date_naive()).to_string();
 
             let diff = match crate::leetcode::fetch_question_by_slug(&slug).await {
                 Ok(q) => q.difficulty,
@@ -152,66 +157,29 @@ pub async fn process_solution_message(
         return Ok(());
     }
 
+    let daily = if is_lc_thread { Daily::LeetCode } else { Daily::NeetCode };
     let mut db = data.db.write().await;
     let guild_data = db.entry(guild_id).or_default();
-
-    let solvers_so_far = guild_data
-        .users
-        .values()
-        .filter(|u| {
-            if is_lc_thread {
-                u.submitted.is_some()
-            } else {
-                u.nc_submitted.is_some()
-            }
-        })
-        .count();
-
-    let user = guild_data.users.entry(msg.author.id).or_default();
-    
-    let already_submitted_now = if is_lc_thread {
-        user.submitted.is_some()
-    } else {
-        user.nc_submitted.is_some()
+    let Some(won) = award(guild_data, msg.author.id, daily, &difficulty, msg.link()) else {
+        return Ok(()); // credited by /claim or another message while we checked
     };
+    let main_channel = guild_data.channel_id;
+    data.save_from_lock(&db).await;
+    drop(db);
 
-    if !already_submitted_now {
-        let base_score = match difficulty.as_str() {
-            "Easy" => 1,
-            "Medium" => 2,
-            "Hard" => 3,
-            _ => 1,
-        };
-
-        let mut total_gain = base_score;
-        if solvers_so_far == 0 {
-            total_gain += 1;
+    if won.first {
+        if let Some(main_channel) = main_channel {
+            let announcement = format!(
+                "🥇 **<@{}>** is the first to solve today's {} daily! (+1 bonus pt)",
+                msg.author.id,
+                daily.name()
+            );
+            let _ = main_channel.say(&ctx.http, announcement).await;
         }
-
-        if is_lc_thread {
-            user.submitted = Some(msg.link());
-        } else {
-            user.nc_submitted = Some(msg.link());
-        }
-        user.monthly_record += 1;
-        user.score += total_gain;
-        user.days_missed = 0;
-
-        if solvers_so_far == 0 {
-            if let Some(main_channel) = guild_data.channel_id {
-                let announcement = format!(
-                    "🥇 **<@{}>** is the first to solve today's {} daily! (+1 bonus pt)",
-                    msg.author.id,
-                    if is_lc_thread { "LeetCode" } else { "NeetCode" }
-                );
-                let _ = main_channel.say(&ctx.http, announcement).await;
-            }
-        }
-
-        let response = format!("✅ Verified via API! +**{}** pts.", total_gain);
-        let _ = msg.reply(ctx, response).await;
-        data.save_from_lock(&db).await;
     }
+
+    let response = format!("✅ Verified via API! +**{}** pts.", won.points);
+    let _ = msg.reply(ctx, response).await;
 
     Ok(())
 }
@@ -230,10 +198,8 @@ pub async fn event_handler(
 
             let guild_id = msg.guild_id.unwrap();
 
-            if let Some(caps) = IG_RE.captures(&msg.content) {
-                let original_url = caps.get(0).unwrap().as_str();
-                let fixed_url = original_url.replace("instagram.com", "vxinstagram.com");
-                let _ = msg.reply(ctx, format!("{}", fixed_url)).await;
+            if let Some(fixed_url) = embeddable_instagram_link(&msg.content) {
+                let _ = msg.reply(ctx, fixed_url).await;
             }
 
             let _ = process_solution_message(ctx, msg, data, guild_id).await;
@@ -241,4 +207,28 @@ pub async fn event_handler(
         _ => {}
     }
     Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn code_blocks_are_detected_across_lines() {
+        assert!(CODE_BLOCK_RE.is_match("here:\n```rust\nfn main() {}\n```"));
+        assert!(!CODE_BLOCK_RE.is_match("I solved it!"));
+        assert!(!CODE_BLOCK_RE.is_match("```unterminated"));
+    }
+
+    #[test]
+    fn instagram_links_are_rewritten_once() {
+        assert_eq!(
+            embeddable_instagram_link("look https://www.instagram.com/reel/AbC_1-x/?igsh=1 lol").as_deref(),
+            Some("https://www.vxinstagram.com/reel/AbC_1-x")
+        );
+        assert_eq!(
+            embeddable_instagram_link("https://instagram.com/p/xyz").as_deref(),
+            Some("https://vxinstagram.com/p/xyz")
+        );
+        assert_eq!(embeddable_instagram_link("https://instagram.com/someuser"), None);
+    }
 }
