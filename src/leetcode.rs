@@ -232,3 +232,50 @@ pub async fn fetch_user_rating(username: &str) -> Result<f64, reqwest::Error> {
         .as_f64()
         .unwrap_or(0.0))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Trimmed copies of real leetcode.com/graphql responses. If LeetCode renames
+    // a field these fail here instead of silently breaking verification.
+
+    #[test]
+    fn parses_the_daily_challenge() {
+        let json = r#"{"data":{"activeDailyCodingChallengeQuestion":{
+            "link":"/problems/two-sum/",
+            "question":{"acRate":55.1,"difficulty":"Easy","questionFrontendId":"1",
+                        "isPaidOnly":false,"title":"Two Sum","titleSlug":"two-sum"}}}}"#;
+        let res: DailyResponse = serde_json::from_str(json).unwrap();
+        let q = res.data.active_daily_coding_challenge_question;
+        assert_eq!(q.link, "/problems/two-sum/");
+        assert_eq!(
+            (q.question.id.as_str(), q.question.title_slug.as_str()),
+            ("1", "two-sum")
+        );
+    }
+
+    #[test]
+    fn parses_recent_accepted_submissions() {
+        let json = r#"{"data":{"recentAcSubmissionList":[
+            {"titleSlug":"two-sum","timestamp":"1759700000"},
+            {"titleSlug":"3sum","timestamp":"1759600000"}]}}"#;
+        let res: SubmissionsResponse = serde_json::from_str(json).unwrap();
+        let slugs: Vec<_> = res
+            .data
+            .recent_ac_submission_list
+            .iter()
+            .map(|s| s.title_slug.as_str())
+            .collect();
+        assert_eq!(slugs, ["two-sum", "3sum"]);
+    }
+
+    #[test]
+    fn a_question_without_an_acceptance_rate_still_parses() {
+        let q: Question = serde_json::from_str(
+            r#"{"difficulty":"Hard","questionFrontendId":"42","title":"Trapping Rain Water","titleSlug":"trapping-rain-water","acRate":null}"#,
+        )
+        .unwrap();
+        assert_eq!(q.ac_rate, None);
+    }
+}
