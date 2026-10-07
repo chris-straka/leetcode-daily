@@ -1,7 +1,7 @@
 # [LeetCode Daily Bot](https://github.com/chris-straka/leetcode-daily)
 
 A Discord bot that keeps a group of friends doing LeetCode. Every day it posts
-the LeetCode daily (and a problem from a NeetCode list) in a fresh thread,
+the LeetCode daily (and one from the NeetCode 250, in order) in a fresh thread,
 checks each player's solve against LeetCode's public GraphQL API, and keeps a
 per-server leaderboard with a first-solver bonus, daily penalties, monthly
 winners and contest reminders. It is a single async Rust binary (tokio +
@@ -66,7 +66,7 @@ run against Discord for these numbers.
 - `/ratings`: View the server LeetCode contest rating leaderboard.
 - `/register`: Link your LeetCode account.
 - `/random`: Get a random question.
-- `/neetcode`: Get today's NeetCode-list problem.
+- `/neetcode`: Get today's NeetCode 250 problem.
 - `/claim`: Verify today's solves without pasting code.
 - `/winners`: Past Leetcoders of the Month.
 - `/channel`, `/toggle`, `/contest_setup` (Manage Server): pick the daily channel, turn the LeetCode and NeetCode dailies on or off, and pick the contest-alert channel.
